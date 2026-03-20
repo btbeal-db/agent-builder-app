@@ -5,6 +5,7 @@ import NodePalette from "./components/NodePalette";
 import ConfigPanel from "./components/ConfigPanel";
 import StateModelModal from "./components/StateModelModal";
 import StateSummary from "./components/StateSummary";
+import ChatPlayground from "./components/ChatPlayground";
 import { StateProvider } from "./StateContext";
 import { fetchNodeTypes, previewGraph, exportGraph, validateGraph } from "./api";
 import type { NodeTypeMetadata, GraphDef, PreviewResponse, StateFieldDef } from "./types";
@@ -27,6 +28,7 @@ export default function App() {
     { name: "user_input", type: "str", description: "The user's initial message", sub_fields: [] },
   ]);
   const [showStateModal, setShowStateModal] = useState(true);
+  const [showChat, setShowChat] = useState(false);
   const isResizing = useRef(false);
 
   const stateVariableNames = stateFields.map((f) => f.name);
@@ -120,6 +122,9 @@ export default function App() {
             <button className="btn btn-secondary" onClick={handleExport}>
               Export Python
             </button>
+            <button className="btn btn-primary" onClick={() => setShowChat(true)}>
+              Chat Playground
+            </button>
           </div>
         </header>
 
@@ -138,7 +143,7 @@ export default function App() {
             nodeTypes={nodeTypes}
             stateVariableNames={stateVariableNames}
             onNodeSelect={setSelectedNodeId}
-            onGraphReady={setGraphGetter}
+            onGraphReady={(getter) => setGraphGetter(() => getter)}
           />
 
           {/* Resize handle */}
@@ -228,6 +233,15 @@ export default function App() {
           fields={stateFields}
           onChange={setStateFields}
           onClose={() => setShowStateModal(false)}
+        />
+      )}
+
+      {/* Chat Playground drawer */}
+      {showChat && (
+        <ChatPlayground
+          graphGetter={graphGetter}
+          stateFieldsRef={stateFieldsRef}
+          onClose={() => setShowChat(false)}
         />
       )}
       </StateProvider>

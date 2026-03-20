@@ -65,3 +65,13 @@ export interface ExportResponse {
   code: string;
   error: string | null;
 }
+
+export interface ChatMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  error?: string | null;
+  execution_trace?: PreviewResponse["execution_trace"];
+  state?: Record<string, string>;
+  loading?: boolean;
+}
