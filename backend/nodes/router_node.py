@@ -20,27 +20,25 @@ def _parse_routes(config: dict[str, Any]) -> list[dict[str, str]]:
     return routes
 
 
-def _try_parse_json(text: str) -> dict | None:
-    try:
-        parsed = json.loads(text)
-        if isinstance(parsed, dict):
-            return parsed
-    except (json.JSONDecodeError, TypeError):
-        pass
-    return None
+def _resolve_value(state: dict[str, Any], eval_var: str, sub_field: str) -> Any:
+    """Get the value to route on, resolving into structured sub-fields."""
+    raw = state.get(eval_var, "")
 
+    if not sub_field:
+        return raw
 
-def _match_json_field(parsed: dict, field_name: str, expected: str) -> bool:
-    if field_name not in parsed:
-        return False
-    actual = parsed[field_name]
-    expected_lower = expected.strip().lower()
-    actual_str = str(actual).strip().lower()
-    if actual_str == expected_lower:
-        return True
-    if isinstance(actual, bool):
-        return expected_lower in ("true", "1", "yes") if actual else expected_lower in ("false", "0", "no")
-    return False
+    # Structured field stored as JSON string — parse and extract sub-field
+    if isinstance(raw, str):
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict):
+                return parsed.get(sub_field, "")
+        except (json.JSONDecodeError, TypeError):
+            pass
+    elif isinstance(raw, dict):
+        return raw.get(sub_field, "")
+
+    return ""
 
 
 @register
@@ -55,7 +53,7 @@ class RouterNode(BaseNode):
 
     @property
     def description(self) -> str:
-        return "Conditional edge — route based on keywords or structured output fields."
+        return "Conditional branch — route based on a state field's value."
 
     @property
     def category(self) -> str:
@@ -83,7 +81,7 @@ class RouterNode(BaseNode):
                 label="Routes",
                 field_type="route_editor",
                 required=True,
-                default='[{"name": "default", "condition_type": "keywords", "condition": "", "json_field": "", "json_value": ""}]',
+                default='[{"label": "default", "match_value": ""}]',
             ),
         ]
 
@@ -92,11 +90,17 @@ class RouterNode(BaseNode):
         return True
 
     def get_route_names(self, config: dict[str, Any]) -> list[str]:
-        return [r["name"] for r in _parse_routes(config) if r.get("name")]
+        """Return handle IDs (match_value for matched routes, label for fallback)."""
+        return [
+            r.get("match_value") or r.get("label", "default")
+            for r in _parse_routes(config)
+            if r.get("label") or r.get("match_value")
+        ]
 
     def execute(self, state: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
         eval_var = config.get("evaluates", "user_input")
-        input_text = state.get(eval_var, "")
+        sub_field = config.get("_route_sub_field", "")
+        value = _resolve_value(state, eval_var, sub_field)
         routes = _parse_routes(config)
 
         if not routes:
@@ -105,32 +109,49 @@ class RouterNode(BaseNode):
                 "messages": [{"role": "system", "content": "Router: no routes defined.", "node": "router"}],
             }
 
-        parsed_json = _try_parse_json(input_text)
-        chosen = routes[-1].get("name", "default")
+        value_str = str(value).strip().lower()
+        field_label = f"{eval_var}{'.' + sub_field if sub_field else ''}"
+
+        # Check all routes with a match_value; last route without one is fallback
+        chosen_label = None
+        chosen_key = None
         match_reason = "fallback"
 
         for route in routes:
-            condition_type = route.get("condition_type", "keywords")
-            if condition_type == "json_field":
-                field_name = route.get("json_field", "").strip()
-                expected = route.get("json_value", "").strip()
-                if not field_name:
-                    continue
-                if parsed_json is not None and _match_json_field(parsed_json, field_name, expected):
-                    chosen = route["name"]
-                    match_reason = f"field '{field_name}' = {expected}"
-                    break
-            else:
-                condition = route.get("condition", "").strip()
-                if not condition:
-                    continue
-                keywords = [kw.strip().lower() for kw in condition.split(",") if kw.strip()]
-                if any(kw in input_text.lower() for kw in keywords):
-                    chosen = route["name"]
-                    match_reason = "keyword match"
-                    break
+            match_value = route.get("match_value", "").strip().lower()
+
+            if not match_value:
+                # No match_value = fallback; only use if nothing else matched
+                if chosen_label is None:
+                    chosen_label = route.get("label", "default")
+                    chosen_key = chosen_label
+                continue
+
+            # Bool match
+            if value_str in ("true", "false") and value_str == match_value:
+                chosen_label = route["label"]
+                chosen_key = route.get("match_value") or chosen_label
+                match_reason = f"{field_label} = {value_str}"
+                break
+
+            # Keyword match
+            keywords = [kw.strip() for kw in match_value.split(",") if kw.strip()]
+            if any(kw in value_str for kw in keywords):
+                chosen_label = route["label"]
+                chosen_key = route.get("match_value") or chosen_label
+                match_reason = f"keyword match in {field_label}"
+                break
+
+        # If nothing matched and no fallback was found, use last route
+        if chosen_label is None:
+            chosen_label = routes[-1].get("label", "default")
+            chosen_key = routes[-1].get("match_value") or chosen_label
 
         return {
-            "_route": chosen,
-            "messages": [{"role": "system", "content": f"Router chose path: {chosen} ({match_reason})", "node": "router"}],
+            "_route": chosen_key,
+            "messages": [{
+                "role": "system",
+                "content": f"Router → {chosen_label} ({match_reason})",
+                "node": "router",
+            }],
         }

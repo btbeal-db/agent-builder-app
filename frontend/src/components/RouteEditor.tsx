@@ -1,116 +1,132 @@
+import type { StateFieldDef } from "../types";
+
 export interface Route {
-  name: string;
-  condition_type: "keywords" | "json_field";
-  condition: string;       // keywords: "sales, revenue" | json_field: unused
-  json_field: string;      // field name to check in JSON
-  json_value: string;      // expected value (e.g. "true", "false", "good")
+  label: string;       // displayed on the handle and in the UI
+  match_value: string; // what to match against (e.g. "true", "sales,revenue")
 }
 
-const EMPTY_ROUTE: Route = {
-  name: "",
-  condition_type: "keywords",
-  condition: "",
-  json_field: "",
-  json_value: "",
-};
-
 interface Props {
+  evaluatedField: StateFieldDef | null;
+  /** For structured fields — which sub-field to branch on */
+  subField: string;
+  onSubFieldChange: (name: string) => void;
   routes: Route[];
   onChange: (routes: Route[]) => void;
 }
 
-function normalizeRoute(r: Partial<Route> & { name: string }): Route {
-  return { ...EMPTY_ROUTE, ...r };
-}
+export default function RouteEditor({
+  evaluatedField,
+  subField,
+  onSubFieldChange,
+  routes,
+  onChange,
+}: Props) {
+  const fieldType = resolveFieldType(evaluatedField, subField);
 
-export default function RouteEditor({ routes, onChange }: Props) {
-  // Normalize on read so old format routes still work
-  const normalized = routes.map(normalizeRoute);
+  // ── Bool: fixed True / False routes, no editing ──────────────
+  if (fieldType === "bool") {
+    return (
+      <div className="route-editor">
+        <div className="route-editor-header">
+          Routes based on <strong>{evaluatedField?.name}{subField ? `.${subField}` : ""}</strong> (True / False)
+        </div>
+        <div className="route-list">
+          <div className="route-row route-fixed">
+            <span className="route-fixed-label route-true">True</span>
+          </div>
+          <div className="route-row route-fixed">
+            <span className="route-fixed-label route-false">False</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
+  // ── Structured: pick a sub-field first, then recurse on its type ──
+  if (fieldType === "structured" && evaluatedField) {
+    const subs = evaluatedField.sub_fields;
+    return (
+      <div className="route-editor">
+        <div className="route-editor-header">
+          Pick which field inside <strong>{evaluatedField.name}</strong> to branch on:
+        </div>
+        <div className="config-field">
+          <select
+            value={subField}
+            onChange={(e) => onSubFieldChange(e.target.value)}
+          >
+            <option value="">select sub-field...</option>
+            {subs.map((sf) => (
+              <option key={sf.name} value={sf.name}>
+                {sf.name} ({sf.type})
+              </option>
+            ))}
+          </select>
+        </div>
+        {subField && (
+          <RouteEditor
+            evaluatedField={evaluatedField}
+            subField={subField}
+            onSubFieldChange={onSubFieldChange}
+            routes={routes}
+            onChange={onChange}
+          />
+        )}
+      </div>
+    );
+  }
+
+  // ── String / other: keyword-match routes + fallback ──────────
   const updateRoute = (index: number, updates: Partial<Route>) => {
-    const updated = normalized.map((r, i) => (i === index ? { ...r, ...updates } : r));
-    onChange(updated);
+    onChange(routes.map((r, i) => (i === index ? { ...r, ...updates } : r)));
   };
 
   const addRoute = () => {
-    const name = `route_${normalized.length + 1}`;
+    // Insert before the fallback (last route)
+    const fallback = routes[routes.length - 1];
     onChange([
-      ...normalized.slice(0, -1),
-      { ...EMPTY_ROUTE, name },
-      normalized[normalized.length - 1],
+      ...routes.slice(0, -1),
+      { label: "", match_value: "" },
+      fallback,
     ]);
   };
 
   const removeRoute = (index: number) => {
-    if (normalized.length <= 1) return;
-    onChange(normalized.filter((_, i) => i !== index));
+    if (routes.length <= 1) return;
+    onChange(routes.filter((_, i) => i !== index));
   };
 
   return (
     <div className="route-editor">
       <div className="route-editor-header">
-        Routes are evaluated top-to-bottom. First match wins. Last route is the fallback.
+        Match keywords in <strong>{evaluatedField?.name ?? "field"}</strong>.
+        First match wins. Last route is the fallback.
       </div>
 
       <div className="route-list">
-        {normalized.map((route, i) => {
-          const isLast = i === normalized.length - 1;
+        {routes.map((route, i) => {
+          const isLast = i === routes.length - 1;
           return (
             <div key={i} className={`route-row${isLast ? " route-fallback" : ""}`}>
               <div className="route-fields">
                 <input
                   className="route-name"
-                  value={route.name}
-                  placeholder="route name"
-                  onChange={(e) => updateRoute(i, { name: e.target.value })}
+                  value={route.label}
+                  placeholder={isLast ? "fallback" : "route label"}
+                  onChange={(e) => updateRoute(i, { label: e.target.value })}
                 />
-
                 {isLast ? (
                   <span className="route-fallback-label">fallback (always matches)</span>
                 ) : (
-                  <>
-                    <select
-                      className="route-condition-type"
-                      value={route.condition_type}
-                      onChange={(e) =>
-                        updateRoute(i, {
-                          condition_type: e.target.value as Route["condition_type"],
-                        })
-                      }
-                    >
-                      <option value="keywords">Keywords</option>
-                      <option value="json_field">JSON Field Equals</option>
-                    </select>
-
-                    {route.condition_type === "keywords" ? (
-                      <input
-                        className="route-condition"
-                        value={route.condition}
-                        placeholder="match keywords: data, sales, revenue"
-                        onChange={(e) => updateRoute(i, { condition: e.target.value })}
-                      />
-                    ) : (
-                      <div className="route-json-fields">
-                        <input
-                          className="route-json-field"
-                          value={route.json_field}
-                          placeholder="field name (e.g. good)"
-                          onChange={(e) => updateRoute(i, { json_field: e.target.value })}
-                        />
-                        <span className="route-json-eq">=</span>
-                        <input
-                          className="route-json-value"
-                          value={route.json_value}
-                          placeholder="value (e.g. true)"
-                          onChange={(e) => updateRoute(i, { json_value: e.target.value })}
-                        />
-                      </div>
-                    )}
-                  </>
+                  <input
+                    className="route-condition"
+                    value={route.match_value}
+                    placeholder="keywords: sales, revenue"
+                    onChange={(e) => updateRoute(i, { match_value: e.target.value })}
+                  />
                 )}
               </div>
-
-              {normalized.length > 1 && (
+              {routes.length > 1 && (
                 <button
                   className="route-remove"
                   onClick={() => removeRoute(i)}
@@ -129,4 +145,15 @@ export default function RouteEditor({ routes, onChange }: Props) {
       </button>
     </div>
   );
+}
+
+/** Resolve the effective type to route on, following into structured sub-fields. */
+function resolveFieldType(
+  field: StateFieldDef | null,
+  subField: string
+): string {
+  if (!field) return "str";
+  if (field.type !== "structured" || !subField) return field.type;
+  const sf = field.sub_fields.find((s) => s.name === subField);
+  return sf?.type ?? "str";
 }

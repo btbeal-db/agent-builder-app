@@ -11,6 +11,8 @@ dependencies = [
     "langchain-community>=0.3.0",
     "databricks-sdk>=0.20.0",
     "pydantic>=2.0.0",
+    "mlflow>=3.10.1",
+    "databricks-langchain>=0.17.0",
 ]
 
 [tool.hatch.build.targets.wheel]

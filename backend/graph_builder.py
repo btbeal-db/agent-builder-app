@@ -20,25 +20,26 @@ def _build_state_type(state_fields: list[StateFieldDef]) -> type:
 
 
 def _make_node_fn(node_impl, config: dict[str, Any], writes_to: str, target_field: StateFieldDef | None):
-    """Create a closure so each graph node captures its own config."""
+    """Create a closure so each graph node captures its own config.
+
+    Returns only the state *updates* — LangGraph merges them into state.
+    """
 
     def fn(state: dict[str, Any]) -> dict[str, Any]:
-        # Inject writes_to and target field schema into config for the node
         enriched_config = {
             **config,
             "_writes_to": writes_to,
             "_target_field": target_field,
         }
         updates = node_impl.execute(state, enriched_config)
-        new_state = dict(state)
-        for key, val in updates.items():
-            if key == "messages":
-                new_state["messages"] = state.get("messages", []) + val
-            else:
-                new_state[key] = val
-        return new_state
 
-    fn.__name__ = f"node_{node_impl.node_type}"
+        # Append messages rather than replace
+        if "messages" in updates:
+            updates["messages"] = state.get("messages", []) + updates["messages"]
+
+        return updates
+
+    fn.__name__ = f"node_{writes_to or node_impl.node_type}"
     return fn
 
 
@@ -61,17 +62,24 @@ def build_graph(graph_def: GraphDef):
 
     node_map = {n.id: n for n in graph_def.nodes}
 
-    outgoing: dict[str, list] = {n.id: [] for n in graph_def.nodes}
-    incoming: dict[str, list] = {n.id: [] for n in graph_def.nodes}
-    for edge in graph_def.edges:
-        outgoing[edge.source].append(edge)
-        incoming[edge.target].append(edge)
+    start_edges = [e for e in graph_def.edges if e.source == "__start__"]
+    end_edges = [e for e in graph_def.edges if e.target == "__end__"]
+    regular_edges = [
+        e for e in graph_def.edges
+        if e.source != "__start__" and e.target != "__end__"
+    ]
 
-    entry_nodes = [nid for nid, inc in incoming.items() if not inc]
-    exit_nodes = [nid for nid, out in outgoing.items() if not out]
+    entry_nodes = [e.target for e in start_edges]
+    exit_nodes = [e.source for e in end_edges]
 
     if not entry_nodes:
-        raise ValueError("Graph has no entry point (every node has incoming edges).")
+        raise ValueError("Connect the START node to at least one node.")
+    if not exit_nodes:
+        raise ValueError("Connect at least one node to the END node.")
+
+    outgoing: dict[str, list] = {n.id: [] for n in graph_def.nodes}
+    for edge in regular_edges:
+        outgoing[edge.source].append(edge)
 
     router_nodes = set()
     for node_def in graph_def.nodes:
@@ -89,9 +97,12 @@ def build_graph(graph_def: GraphDef):
     for nid in entry_nodes:
         builder.add_edge(START, nid)
 
+    # Build a lookup of end_edges by source for router→END handling
+    end_edges_by_source: dict[str, list] = {}
+    for e in end_edges:
+        end_edges_by_source.setdefault(e.source, []).append(e)
+
     for node_id, edges in outgoing.items():
-        if not edges:
-            continue
         if node_id in router_nodes:
             node_def = node_map[node_id]
             node_impl = get_node(node_def.type)
@@ -99,6 +110,10 @@ def build_graph(graph_def: GraphDef):
             for edge in edges:
                 handle = edge.source_handle or "default"
                 route_map[handle] = edge.target
+            # Include any router→END edges in the route map
+            for edge in end_edges_by_source.pop(node_id, []):
+                handle = edge.source_handle or "default"
+                route_map[handle] = END
             builder.add_conditional_edges(
                 node_id,
                 _make_router_fn(node_impl, node_def.config),
@@ -108,7 +123,8 @@ def build_graph(graph_def: GraphDef):
             for edge in edges:
                 builder.add_edge(node_id, edge.target)
 
-    for nid in exit_nodes:
+    # Remaining (non-router) → END edges
+    for nid, edges in end_edges_by_source.items():
         builder.add_edge(nid, END)
 
     return builder.compile()
@@ -170,22 +186,24 @@ def generate_code(graph_def: GraphDef) -> str:
         lines.append(f'    builder.add_node("{node_def.id}", node_{node_def.id})')
     lines.append("")
 
+    start_edges = [e for e in graph_def.edges if e.source == "__start__"]
+    end_edges = [e for e in graph_def.edges if e.target == "__end__"]
+    regular_edges = [
+        e for e in graph_def.edges
+        if e.source != "__start__" and e.target != "__end__"
+    ]
+
     outgoing: dict[str, list] = {n.id: [] for n in graph_def.nodes}
-    incoming: dict[str, list] = {n.id: [] for n in graph_def.nodes}
-    for edge in graph_def.edges:
+    for edge in regular_edges:
         outgoing[edge.source].append(edge)
-        incoming[edge.target].append(edge)
 
-    entry_nodes = [nid for nid, inc in incoming.items() if not inc]
-    exit_nodes = [nid for nid, out in outgoing.items() if not out]
-
-    for nid in entry_nodes:
-        lines.append(f'    builder.add_edge(START, "{nid}")')
+    for e in start_edges:
+        lines.append(f'    builder.add_edge(START, "{e.target}")')
     for node_id, edges in outgoing.items():
         for edge in edges:
             lines.append(f'    builder.add_edge("{edge.source}", "{edge.target}")')
-    for nid in exit_nodes:
-        lines.append(f'    builder.add_edge("{nid}", END)')
+    for e in end_edges:
+        lines.append(f'    builder.add_edge("{e.source}", END)')
 
     lines.append("")
     lines.append("    return builder.compile()")

@@ -5,7 +5,7 @@ import NodePalette from "./components/NodePalette";
 import ConfigPanel from "./components/ConfigPanel";
 import StateModelModal from "./components/StateModelModal";
 import StateSummary from "./components/StateSummary";
-import { StateVarsProvider } from "./StateContext";
+import { StateProvider } from "./StateContext";
 import { fetchNodeTypes, previewGraph, exportGraph, validateGraph } from "./api";
 import type { NodeTypeMetadata, GraphDef, PreviewResponse, StateFieldDef } from "./types";
 
@@ -100,7 +100,7 @@ export default function App() {
 
   return (
     <ReactFlowProvider>
-      <StateVarsProvider value={stateVariableNames}>
+      <StateProvider value={{ names: stateVariableNames, fields: stateFields }}>
       <div className={`app${showStateModal ? " app-blurred" : ""}`}>
         {/* Header */}
         <header className="header">
@@ -230,7 +230,7 @@ export default function App() {
           onClose={() => setShowStateModal(false)}
         />
       )}
-      </StateVarsProvider>
+      </StateProvider>
     </ReactFlowProvider>
   );
 }

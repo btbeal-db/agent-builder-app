@@ -14,7 +14,28 @@ import {
 import "@xyflow/react/dist/style.css";
 
 import AgentNode from "./nodes/AgentNode";
+import SentinelNode from "./nodes/SentinelNode";
 import type { NodeTypeMetadata, GraphDef } from "../types";
+
+const START_ID = "__start__";
+const END_ID = "__end__";
+
+const INITIAL_NODES: Node[] = [
+  {
+    id: START_ID,
+    type: "sentinelNode",
+    position: { x: 250, y: 30 },
+    data: { kind: "start" },
+    deletable: false,
+  },
+  {
+    id: END_ID,
+    type: "sentinelNode",
+    position: { x: 250, y: 500 },
+    data: { kind: "end" },
+    deletable: false,
+  },
+];
 
 interface Props {
   nodeTypes: NodeTypeMetadata[];
@@ -27,10 +48,13 @@ let nodeIdCounter = 0;
 
 export default function Canvas({ nodeTypes, stateVariableNames, onNodeSelect, onGraphReady }: Props) {
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>(INITIAL_NODES);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
 
-  const customNodeTypes = useMemo(() => ({ agentNode: AgentNode }), []);
+  const customNodeTypes = useMemo(
+    () => ({ agentNode: AgentNode, sentinelNode: SentinelNode }),
+    []
+  );
 
   const onConnect = useCallback(
     (params: Connection) => {
@@ -58,13 +82,18 @@ export default function Canvas({ nodeTypes, stateVariableNames, onNodeSelect, on
 
   useEffect(() => {
     onGraphReady(() => {
-      const graphNodes = nodesRef.current.map((n) => ({
-        id: n.id,
-        type: (n.data.nodeType as string) ?? "llm",
-        writes_to: (n.data.writes_to as string) ?? "",
-        config: (n.data.config as Record<string, unknown>) ?? {},
-        position: n.position,
-      }));
+      // Exclude sentinel nodes from the node list
+      const graphNodes = nodesRef.current
+        .filter((n) => n.id !== START_ID && n.id !== END_ID)
+        .map((n) => ({
+          id: n.id,
+          type: (n.data.nodeType as string) ?? "llm",
+          writes_to: (n.data.writes_to as string) ?? "",
+          config: (n.data.config as Record<string, unknown>) ?? {},
+          position: n.position,
+        }));
+      // Edges from/to sentinel nodes use the special __start__/__end__ ids
+      // which the backend maps to LangGraph START/END
       const graphEdges = edgesRef.current.map((e) => ({
         id: e.id,
         source: e.source,

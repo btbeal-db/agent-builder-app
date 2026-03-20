@@ -4,6 +4,8 @@ import json
 from typing import Any
 
 from pydantic import Field, create_model
+from databricks_langchain import ChatDatabricks
+from langchain_core.messages import HumanMessage, SystemMessage
 
 from .base import BaseNode, NodeConfigField
 from . import register
@@ -40,34 +42,8 @@ def build_pydantic_model(sub_fields: list[dict[str, str]], model_name: str = "St
     return create_model(model_name, **field_definitions)
 
 
-def _stub_structured_response(model_cls: type) -> dict[str, Any]:
-    stubs: dict[str, Any] = {}
-    for name, field_info in model_cls.model_fields.items():
-        annotation = field_info.annotation
-        if annotation == str:
-            stubs[name] = f"<stub {name}>"
-        elif annotation == int:
-            stubs[name] = 42
-        elif annotation == float:
-            stubs[name] = 0.95
-        elif annotation == bool:
-            stubs[name] = True
-        elif annotation == list[str]:
-            stubs[name] = [f"<stub {name} 1>", f"<stub {name} 2>"]
-        elif annotation == list[int]:
-            stubs[name] = [1, 2, 3]
-        elif annotation == list[float]:
-            stubs[name] = [0.1, 0.2, 0.3]
-        else:
-            stubs[name] = f"<stub {name}>"
-    return stubs
-
-
 def _resolve_templates(template: str, state: dict[str, Any]) -> str:
-    """Replace {field_name} placeholders in the template with state values.
-
-    Uses safe substitution — unknown keys are left as-is.
-    """
+    """Replace {field_name} placeholders in the template with state values."""
     result = template
     for key, val in state.items():
         if key in ("messages", "_writes_to", "_target_field"):
@@ -84,6 +60,19 @@ def _build_state_context(state: dict[str, Any]) -> str:
             continue
         parts.append(f"{key}: {val}")
     return "\n".join(parts)
+
+
+def _build_schema_instruction(sub_fields: list[dict[str, str]], field_name: str) -> str:
+    """Build a prompt section describing the expected structured output."""
+    lines = [f"You must respond with a structured `{field_name}` object containing:"]
+    for f in sub_fields:
+        name = f.get("name", "")
+        type_str = f.get("type", "str")
+        desc = f.get("description", "")
+        if not name:
+            continue
+        lines.append(f"- {name} ({type_str}): {desc}" if desc else f"- {name} ({type_str})")
+    return "\n".join(lines)
 
 
 @register
@@ -118,7 +107,7 @@ class LLMNode(BaseNode):
             NodeConfigField(
                 name="endpoint",
                 label="Serving Endpoint",
-                placeholder="databricks-meta-llama-3-1-70b-instruct",
+                placeholder="databricks-meta-llama-3-3-70b-instruct",
             ),
             NodeConfigField(
                 name="system_prompt",
@@ -139,41 +128,54 @@ class LLMNode(BaseNode):
     def execute(self, state: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
         writes_to = config.get("_writes_to", "")
         target_field = config.get("_target_field")
-        endpoint = config.get("endpoint", "default")
+        endpoint = config.get("endpoint", "databricks-meta-llama-3-3-70b-instruct")
+        temperature = float(config.get("temperature", 0.7))
         raw_prompt = config.get("system_prompt", "You are a helpful assistant.")
 
         # Resolve {field_name} templates in the system prompt from state
         system_prompt = _resolve_templates(raw_prompt, state)
         state_context = _build_state_context(state)
 
+        llm = ChatDatabricks(endpoint=endpoint, temperature=temperature)
+
         # Auto-detect structured output from the state field definition
         is_structured = target_field is not None and getattr(target_field, "type", "") == "structured"
 
         if is_structured:
             sub_fields = getattr(target_field, "sub_fields", [])
-            model_cls = build_pydantic_model(sub_fields)
+            model_cls = build_pydantic_model(sub_fields, model_name=writes_to.title().replace("_", ""))
             if model_cls is None:
                 return {
                     writes_to: "Error: structured field has no valid sub-fields",
                     "messages": [{"role": "system", "content": "LLM: invalid structured field schema.", "node": "llm"}],
                 }
 
-            # PoC stub — real impl:
-            #   llm = ChatDatabricks(endpoint=endpoint, temperature=temperature)
-            #   structured_llm = llm.with_structured_output(model_cls)
-            #   result = structured_llm.invoke([SystemMessage(system_prompt), HumanMessage(state_context)])
-            stub_data = _stub_structured_response(model_cls)
-            response_text = json.dumps(stub_data, indent=2)
+            # Auto-inject schema description so the LLM knows what to produce
+            schema_instruction = _build_schema_instruction(sub_fields, writes_to)
+            system_prompt = f"{system_prompt}\n\n{schema_instruction}"
+
+            structured_llm = llm.with_structured_output(model_cls)
+            result = structured_llm.invoke([
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=state_context or state.get("user_input", "")),
+            ])
+
+            result_dict = result.model_dump()
+            response_text = json.dumps(result_dict, indent=2)
 
             return {
                 writes_to: response_text,
                 "messages": [
-                    {"role": "assistant", "content": f"[LLM:{endpoint}] Structured output:\n{response_text}", "node": "llm"},
+                    {"role": "assistant", "content": f"[LLM → {writes_to}] {response_text}", "node": "llm"},
                 ],
             }
 
         # Plain text path
-        response_text = f"[LLM:{endpoint}] Response given state:\n{state_context[:200]}"
+        response = llm.invoke([
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=state_context or state.get("user_input", "")),
+        ])
+        response_text = response.content
 
         return {
             writes_to: response_text,

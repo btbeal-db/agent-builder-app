@@ -1,9 +1,23 @@
 import { createContext, useContext } from "react";
+import type { StateFieldDef } from "./types";
 
-const StateVarsContext = createContext<string[]>([]);
+interface StateContextValue {
+  names: string[];
+  fields: StateFieldDef[];
+}
 
-export const StateVarsProvider = StateVarsContext.Provider;
+const StateContext = createContext<StateContextValue>({ names: [], fields: [] });
 
-export function useStateVars() {
-  return useContext(StateVarsContext);
+export const StateProvider = StateContext.Provider;
+
+export function useStateVars(): string[] {
+  return useContext(StateContext).names;
+}
+
+export function useStateFields(): StateFieldDef[] {
+  return useContext(StateContext).fields;
+}
+
+export function useStateField(name: string): StateFieldDef | undefined {
+  return useContext(StateContext).fields.find((f) => f.name === name);
 }

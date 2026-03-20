@@ -237,6 +237,55 @@
   margin-top: 0.2rem;
 }
 
+.modal-builtin {
+  opacity: 0.55;
+}
+
+.modal-builtin .modal-field-row {
+  border-bottom: 1px dashed var(--border);
+}
+
+.modal-field-type-label {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  font-family: monospace;
+}
+
+.modal-builtin-desc {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.modal-presets {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.modal-presets label {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.modal-preset-buttons {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.btn-preset {
+  background: var(--bg-elevated);
+  border: 1px solid var(--accent);
+  color: var(--accent);
+}
+
+.btn-preset:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
 .modal-footer {
   padding: 1.25rem 2.5rem;
   display: flex;
@@ -544,6 +593,57 @@
 }
 
 /* ── Custom ReactFlow nodes ───────────────────────────────────── */
+/* ── Sentinel (START / END) nodes ─────────────────────────────── */
+.sentinel-node {
+  background: var(--bg-surface);
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  min-width: 140px;
+  padding: 0.5rem 0.75rem;
+  text-align: center;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.sentinel-start {
+  border-color: var(--success);
+}
+
+.sentinel-end {
+  border-color: var(--danger);
+}
+
+.sentinel-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  margin-bottom: 0.35rem;
+}
+
+.sentinel-start .sentinel-label {
+  color: var(--success);
+}
+
+.sentinel-end .sentinel-label {
+  color: var(--danger);
+}
+
+.sentinel-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  justify-content: center;
+}
+
+.sentinel-field {
+  font-size: 0.65rem;
+  font-family: monospace;
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+}
+
 .agent-node {
   background: var(--bg-surface);
   border: 1.5px solid var(--border);
@@ -762,16 +862,6 @@
   font-family: monospace;
 }
 
-.route-condition-type {
-  width: 100%;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  color: var(--text);
-  padding: 0.25rem 0.4rem;
-  font-size: 0.72rem;
-}
-
 .route-condition {
   width: 100%;
   background: var(--bg);
@@ -782,38 +872,23 @@
   font-size: 0.72rem;
 }
 
-.route-json-fields {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
+.route-fixed {
+  justify-content: center;
 }
 
-.route-json-field {
-  flex: 1;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  color: var(--text);
-  padding: 0.25rem 0.4rem;
-  font-size: 0.72rem;
-  font-family: monospace;
-}
-
-.route-json-eq {
-  color: var(--text-muted);
+.route-fixed-label {
   font-size: 0.8rem;
-  flex-shrink: 0;
+  font-weight: 600;
+  font-family: monospace;
+  padding: 0.15rem 0.5rem;
 }
 
-.route-json-value {
-  flex: 1;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  color: var(--text);
-  padding: 0.25rem 0.4rem;
-  font-size: 0.72rem;
-  font-family: monospace;
+.route-true {
+  color: var(--success);
+}
+
+.route-false {
+  color: var(--danger);
 }
 
 .route-fallback-label {
@@ -849,20 +924,47 @@
   gap: 0.3rem;
 }
 
-.route-labels {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.2rem;
-  margin-top: 0.15rem;
+/* ── Router output rows ──────────────────────────────────────── */
+.agent-node-router {
+  min-width: 180px;
 }
 
-.route-label {
-  padding: 0.08rem 0.3rem;
-  border-radius: 3px;
-  font-size: 0.6rem;
+.router-outputs {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin-top: 0.25rem;
+}
+
+.router-output-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.4rem;
+  padding: 0.2rem 0.4rem;
+  position: relative;
+}
+
+.router-output-label {
+  font-size: 0.7rem;
   font-family: monospace;
-  background: rgba(239, 68, 68, 0.15);
+  font-weight: 600;
   color: #f87171;
+}
+
+.router-output-fallback {
+  font-weight: 400;
+  font-style: italic;
+  color: var(--text-muted);
+}
+
+.router-output-handle {
+  width: 10px !important;
+  height: 10px !important;
+  background: #f87171 !important;
+  border: 2px solid var(--bg-surface) !important;
+  right: -5px !important;
+  position: absolute !important;
 }
 
 /* ── Schema editor (structured output) ────────────────────────── */

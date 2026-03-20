@@ -40,17 +40,21 @@ def validate_graph(graph: GraphDef):
         errors.append("Graph has no nodes.")
 
     node_ids = {n.id for n in graph.nodes}
+    valid_ids = node_ids | {"__start__", "__end__"}
+
     for edge in graph.edges:
-        if edge.source not in node_ids:
+        if edge.source not in valid_ids:
             errors.append(f"Edge references unknown source node: {edge.source}")
-        if edge.target not in node_ids:
+        if edge.target not in valid_ids:
             errors.append(f"Edge references unknown target node: {edge.target}")
 
-    # Check for entry point
-    targets = {e.target for e in graph.edges}
-    entry_nodes = node_ids - targets
-    if not entry_nodes:
-        errors.append("Graph has no entry point (every node is a target of some edge).")
+    start_edges = [e for e in graph.edges if e.source == "__start__"]
+    end_edges = [e for e in graph.edges if e.target == "__end__"]
+
+    if not start_edges:
+        errors.append("Connect the START node to at least one node.")
+    if not end_edges:
+        errors.append("Connect at least one node to the END node.")
 
     return {"valid": len(errors) == 0, "errors": errors}
 

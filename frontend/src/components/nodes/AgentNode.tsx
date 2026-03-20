@@ -11,7 +11,8 @@ export const ICON_MAP: Record<string, string> = {
 };
 
 interface RouteEntry {
-  name: string;
+  label: string;
+  match_value: string;
 }
 
 function parseRoutes(config: Record<string, unknown>): RouteEntry[] {
@@ -24,6 +25,10 @@ function parseRoutes(config: Record<string, unknown>): RouteEntry[] {
     } catch { /* ignore */ }
   }
   return [];
+}
+
+function routeHandleId(route: RouteEntry): string {
+  return route.match_value || route.label || "default";
 }
 
 export default function AgentNode({ id, data, selected }: NodeProps) {
@@ -49,7 +54,7 @@ export default function AgentNode({ id, data, selected }: NodeProps) {
   };
 
   return (
-    <div className={`agent-node${selected ? " selected" : ""}`}>
+    <div className={`agent-node${selected ? " selected" : ""}${isRouter ? " agent-node-router" : ""}`}>
       <Handle type="target" position={Position.Top} />
 
       <div className="agent-node-header" style={{ background: color }}>
@@ -75,33 +80,31 @@ export default function AgentNode({ id, data, selected }: NodeProps) {
           </div>
         )}
 
+        {/* Router: each route is a row with a labeled handle on the right */}
         {isRouter && routes.length > 0 && (
-          <div className="route-labels">
-            {routes.map((r, i) => (
-              <span key={i} className="route-label">
-                {r.name}{i === routes.length - 1 ? " (fallback)" : ""}
-              </span>
-            ))}
+          <div className="router-outputs">
+            {routes.map((route, i) => {
+              const isFallback = i === routes.length - 1 && routes.length > 1 && !route.match_value;
+              return (
+                <div key={routeHandleId(route)} className="router-output-row">
+                  <span className={`router-output-label${isFallback ? " router-output-fallback" : ""}`}>
+                    {route.label || route.match_value || "?"}{isFallback ? " (fallback)" : ""}
+                  </span>
+                  <Handle
+                    type="source"
+                    position={Position.Right}
+                    id={routeHandleId(route)}
+                    className="router-output-handle"
+                  />
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
 
-      {isRouter && routes.length > 0 ? (
-        routes.map((route, i) => (
-          <Handle
-            key={route.name}
-            type="source"
-            position={Position.Bottom}
-            id={route.name}
-            style={{
-              left: `${((i + 1) / (routes.length + 1)) * 100}%`,
-            }}
-            title={route.name}
-          />
-        ))
-      ) : (
-        <Handle type="source" position={Position.Bottom} />
-      )}
+      {/* Non-router: single source handle at the bottom */}
+      {!isRouter && <Handle type="source" position={Position.Bottom} />}
     </div>
   );
 }
