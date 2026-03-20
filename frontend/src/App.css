@@ -1187,3 +1187,115 @@
 .chat-input-bar input:disabled {
   opacity: 0.6;
 }
+
+/* ── Deploy Modal ────────────────────────────────────────────── */
+.deploy-modal {
+  width: 520px;
+}
+
+.deploy-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.deploy-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.deploy-input {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 0.5rem 0.75rem;
+  font-size: 0.85rem;
+}
+
+.deploy-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.deploy-hint {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  opacity: 0.7;
+}
+
+.deploy-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding: 1rem 0;
+}
+
+.deploy-status {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  padding: 3rem 0;
+}
+
+.deploy-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.deploy-success {
+  padding: 1rem 0;
+}
+
+.deploy-success > p {
+  color: var(--success);
+  font-weight: 600;
+  margin-bottom: 1rem;
+}
+
+.deploy-meta {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-top: 0.5rem;
+}
+
+.deploy-error > p {
+  color: var(--danger);
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+}
+
+.deploy-error pre {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.75rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.btn-deploy {
+  background: var(--success);
+  color: white;
+}
+
+.btn-deploy:hover {
+  background: #16a34a;
+}

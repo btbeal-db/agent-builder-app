@@ -10,6 +10,7 @@ import {
   type Connection,
   type Edge,
   type Node,
+  type NodeChange,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
@@ -54,6 +55,29 @@ export default function Canvas({ nodeTypes, stateVariableNames, onNodeSelect, on
   const customNodeTypes = useMemo(
     () => ({ agentNode: AgentNode, sentinelNode: SentinelNode }),
     []
+  );
+
+  const SENTINEL_IDS = new Set([START_ID, END_ID]);
+
+  // Wrap onNodesChange to protect sentinel nodes and clear selection on delete
+  const handleNodesChange = useCallback(
+    (changes: NodeChange[]) => {
+      // Block removal of sentinel nodes
+      const safe = changes.filter(
+        (c) => c.type !== "remove" || !SENTINEL_IDS.has(c.id)
+      );
+
+      // Clear selection for any nodes being removed
+      const removedIds = safe
+        .filter((c) => c.type === "remove")
+        .map((c) => c.id);
+      if (removedIds.length > 0) {
+        onNodeSelect(null);
+      }
+
+      onNodesChange(safe);
+    },
+    [onNodesChange, onNodeSelect]
   );
 
   const onConnect = useCallback(
@@ -171,7 +195,7 @@ export default function Canvas({ nodeTypes, stateVariableNames, onNodeSelect, on
       <ReactFlow
         nodes={nodes}
         edges={edges}
-        onNodesChange={onNodesChange}
+        onNodesChange={handleNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
         onNodeClick={onNodeClick}

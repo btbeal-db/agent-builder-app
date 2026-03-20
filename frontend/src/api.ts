@@ -1,4 +1,4 @@
-import type { NodeTypeMetadata, GraphDef, PreviewResponse, ExportResponse } from "./types";
+import type { NodeTypeMetadata, GraphDef, PreviewResponse, ExportResponse, DeployRequest, DeployResponse } from "./types";
 
 const BASE = "/api";
 
@@ -34,6 +34,15 @@ export async function exportGraph(graph: GraphDef): Promise<ExportResponse> {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(graph),
+  });
+  return res.json();
+}
+
+export async function deployGraph(req: DeployRequest): Promise<DeployResponse> {
+  const res = await fetch(`${BASE}/graph/deploy`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
   });
   return res.json();
 }

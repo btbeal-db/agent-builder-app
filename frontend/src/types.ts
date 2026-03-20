@@ -66,6 +66,20 @@ export interface ExportResponse {
   error: string | null;
 }
 
+export interface DeployRequest {
+  graph: GraphDef;
+  model_name: string;
+  experiment_path: string;
+  lakebase_conn_string: string;
+}
+
+export interface DeployResponse {
+  success: boolean;
+  endpoint_url: string;
+  model_version: string;
+  error: string | null;
+}
+
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant";

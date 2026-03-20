@@ -6,9 +6,10 @@ import ConfigPanel from "./components/ConfigPanel";
 import StateModelModal from "./components/StateModelModal";
 import StateSummary from "./components/StateSummary";
 import ChatPlayground from "./components/ChatPlayground";
+import DeployModal from "./components/DeployModal";
 import { StateProvider } from "./StateContext";
-import { fetchNodeTypes, previewGraph, exportGraph, validateGraph } from "./api";
-import type { NodeTypeMetadata, GraphDef, PreviewResponse, StateFieldDef } from "./types";
+import { fetchNodeTypes, exportGraph } from "./api";
+import type { NodeTypeMetadata, GraphDef, StateFieldDef } from "./types";
 
 const MIN_PANEL_WIDTH = 280;
 const MAX_PANEL_WIDTH = 700;
@@ -18,17 +19,15 @@ export default function App() {
   const [nodeTypes, setNodeTypes] = useState<NodeTypeMetadata[]>([]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [graphGetter, setGraphGetter] = useState<(() => GraphDef) | null>(null);
-  const [previewInput, setPreviewInput] = useState("What were Q4 sales?");
-  const [previewResult, setPreviewResult] = useState<PreviewResponse | null>(null);
   const [exportedCode, setExportedCode] = useState<string>("");
-  const [activePanel, setActivePanel] = useState<"preview" | "export" | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [activePanel, setActivePanel] = useState<"export" | null>(null);
   const [panelWidth, setPanelWidth] = useState(DEFAULT_PANEL_WIDTH);
   const [stateFields, setStateFields] = useState<StateFieldDef[]>([
     { name: "user_input", type: "str", description: "The user's initial message", sub_fields: [] },
   ]);
   const [showStateModal, setShowStateModal] = useState(true);
   const [showChat, setShowChat] = useState(false);
+  const [showDeploy, setShowDeploy] = useState(false);
   const isResizing = useRef(false);
 
   const stateVariableNames = stateFields.map((f) => f.name);
@@ -67,30 +66,6 @@ export default function App() {
     document.addEventListener("mouseup", onMouseUp);
   }, [panelWidth]);
 
-  const handlePreview = useCallback(async () => {
-    if (!graphGetter) return;
-    setLoading(true);
-    const graph = graphGetter();
-    graph.state_fields = stateFieldsRef.current;
-    const validation = await validateGraph(graph);
-    if (!validation.valid) {
-      setPreviewResult({
-        success: false,
-        output: "",
-        error: `Validation errors:\n${validation.errors.join("\n")}`,
-        execution_trace: [],
-        state: {},
-      });
-      setActivePanel("preview");
-      setLoading(false);
-      return;
-    }
-    const result = await previewGraph(graph, previewInput);
-    setPreviewResult(result);
-    setActivePanel("preview");
-    setLoading(false);
-  }, [graphGetter, previewInput]);
-
   const handleExport = useCallback(async () => {
     if (!graphGetter) return;
     const graph = graphGetter();
@@ -108,22 +83,14 @@ export default function App() {
         <header className="header">
           <h1>Agent Builder</h1>
           <div className="header-actions">
-            <input
-              type="text"
-              className="preview-input"
-              value={previewInput}
-              onChange={(e) => setPreviewInput(e.target.value)}
-              placeholder="Test message..."
-              onKeyDown={(e) => e.key === "Enter" && handlePreview()}
-            />
-            <button className="btn btn-primary" onClick={handlePreview} disabled={loading}>
-              {loading ? "Running..." : "Preview"}
-            </button>
             <button className="btn btn-secondary" onClick={handleExport}>
               Export Python
             </button>
             <button className="btn btn-primary" onClick={() => setShowChat(true)}>
               Chat Playground
+            </button>
+            <button className="btn btn-deploy" onClick={() => setShowDeploy(true)}>
+              Deploy
             </button>
           </div>
         </header>
@@ -163,51 +130,6 @@ export default function App() {
               />
             )}
 
-            {activePanel === "preview" && previewResult && (
-              <div className="result-panel">
-                <h3>Preview Result</h3>
-
-                {previewResult.error ? (
-                  <pre className="result-error">{previewResult.error}</pre>
-                ) : (
-                  <>
-                    <div className="result-section">
-                      <div className="result-label">Output</div>
-                      <pre>{previewResult.output || "(empty)"}</pre>
-                    </div>
-
-                    <details className="result-details">
-                      <summary>State</summary>
-                      <div className="state-grid">
-                        {Object.entries(previewResult.state).map(([key, val]) => (
-                          <div key={key} className="state-entry">
-                            <span className="state-key">{key}</span>
-                            <pre className="state-val">{val || "(empty)"}</pre>
-                          </div>
-                        ))}
-                      </div>
-                    </details>
-
-                    <details className="result-details">
-                      <summary>Execution Trace ({previewResult.execution_trace.length} steps)</summary>
-                      <div className="trace">
-                        {previewResult.execution_trace.map((msg, i) => (
-                          <div key={i} className="trace-step">
-                            <span className="trace-badge">{msg.node ?? msg.role}</span>
-                            <span className="trace-content">{msg.content}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </details>
-                  </>
-                )}
-
-                <button className="btn btn-sm" onClick={() => setActivePanel(null)}>
-                  Close
-                </button>
-              </div>
-            )}
-
             {activePanel === "export" && (
               <div className="result-panel">
                 <h3>Exported Code</h3>
@@ -242,6 +164,15 @@ export default function App() {
           graphGetter={graphGetter}
           stateFieldsRef={stateFieldsRef}
           onClose={() => setShowChat(false)}
+        />
+      )}
+
+      {/* Deploy modal */}
+      {showDeploy && (
+        <DeployModal
+          graphGetter={graphGetter}
+          stateFieldsRef={stateFieldsRef}
+          onClose={() => setShowDeploy(false)}
         />
       )}
       </StateProvider>
