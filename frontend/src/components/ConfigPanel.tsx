@@ -1,4 +1,4 @@
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, useMemo } from "react";
 import { useReactFlow, useNodes } from "@xyflow/react";
 import type { NodeTypeMetadata } from "../types";
 import { useStateFields } from "../StateContext";
@@ -16,37 +16,37 @@ const DEFAULT_ROUTE: Route = { label: "default", match_value: "" };
 export default function ConfigPanel({ selectedNodeId, nodeTypes, stateVariables }: Props) {
   const { setNodes, setEdges } = useReactFlow();
   const stateFields = useStateFields();
-
   const nodes = useNodes();
-  const node = nodes.find((n) => n.id === selectedNodeId);
-  if (!node) return null;
 
-  const nodeType = (node.data.nodeType as string) ?? node.type;
-  const meta = nodeTypes.find((nt) => nt.type === nodeType);
-  if (!meta) return null;
+  const node = useMemo(() => nodes.find((n) => n.id === selectedNodeId), [nodes, selectedNodeId]);
 
-  const isRouter = (node.data.is_router as boolean) ?? false;
-  const config = (node.data.config ?? {}) as Record<string, unknown>;
+  const nodeType = (node?.data.nodeType as string) ?? node?.type ?? "";
+  const meta = useMemo(() => nodeTypes.find((nt) => nt.type === nodeType), [nodeTypes, nodeType]);
+  const isRouter = (node?.data.is_router as boolean) ?? false;
+  const config = (node?.data.config ?? {}) as Record<string, unknown>;
 
   /** Remove all outgoing edges from this router node. */
   const clearRouterEdges = useCallback(() => {
     setEdges((eds) => eds.filter((e) => e.source !== selectedNodeId));
   }, [selectedNodeId, setEdges]);
 
-  const updateConfig = (fieldName: string, value: unknown) => {
-    setNodes((nds) =>
-      nds.map((n) => {
-        if (n.id !== selectedNodeId) return n;
-        return {
-          ...n,
-          data: {
-            ...n.data,
-            config: { ...(n.data.config as Record<string, unknown>), [fieldName]: value },
-          },
-        };
-      })
-    );
-  };
+  const updateConfig = useCallback(
+    (fieldName: string, value: unknown) => {
+      setNodes((nds) =>
+        nds.map((n) => {
+          if (n.id !== selectedNodeId) return n;
+          return {
+            ...n,
+            data: {
+              ...n.data,
+              config: { ...(n.data.config as Record<string, unknown>), [fieldName]: value },
+            },
+          };
+        })
+      );
+    },
+    [selectedNodeId, setNodes]
+  );
 
   // Look up the state field that the router evaluates
   const evaluatesName = (config.evaluates as string) ?? "";
@@ -60,7 +60,7 @@ export default function ConfigPanel({ selectedNodeId, nodeTypes, stateVariables 
       )?.type === "bool");
 
   useEffect(() => {
-    if (!isBoolRoute || !isRouter) return;
+    if (!isBoolRoute || !isRouter || !node) return;
     const currentRoutes = config.routes_json;
     const boolRoutes = [
       { label: "True", match_value: "true" },
@@ -74,6 +74,9 @@ export default function ConfigPanel({ selectedNodeId, nodeTypes, stateVariables 
     updateConfig("routes_json", boolRoutes);
     clearRouterEdges();
   }, [isBoolRoute]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Early return AFTER all hooks
+  if (!node || !meta) return null;
 
   return (
     <div className="config-panel">

@@ -43,11 +43,12 @@ interface Props {
   stateVariableNames: string[];
   onNodeSelect: (nodeId: string | null) => void;
   onGraphReady: (getter: () => GraphDef) => void;
+  onImportReady?: (importer: (graph: GraphDef) => void) => void;
 }
 
 let nodeIdCounter = 0;
 
-export default function Canvas({ nodeTypes, stateVariableNames, onNodeSelect, onGraphReady }: Props) {
+export default function Canvas({ nodeTypes, stateVariableNames, onNodeSelect, onGraphReady, onImportReady }: Props) {
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>(INITIAL_NODES);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
@@ -127,6 +128,43 @@ export default function Canvas({ nodeTypes, stateVariableNames, onNodeSelect, on
       return { nodes: graphNodes, edges: graphEdges, state_fields: [] } as GraphDef;
     });
   }, [onGraphReady]);
+
+  // Expose an import function to load a saved GraphDef onto the canvas
+  useEffect(() => {
+    if (!onImportReady) return;
+    onImportReady((graph: GraphDef) => {
+      const newNodes: Node[] = [...INITIAL_NODES];
+      for (const gn of graph.nodes) {
+        const meta = nodeTypes.find((nt) => nt.type === gn.type);
+        nodeIdCounter = Math.max(nodeIdCounter, parseInt(gn.id.replace(/\D/g, "") || "0", 10));
+        newNodes.push({
+          id: gn.id,
+          type: "agentNode",
+          position: gn.position ?? { x: 250, y: 200 },
+          data: {
+            nodeType: gn.type,
+            display_name: meta?.display_name ?? gn.type,
+            description: meta?.description ?? "",
+            icon: meta?.icon ?? "",
+            color: meta?.color ?? "#6366f1",
+            config_fields: meta?.config_fields ?? [],
+            is_router: gn.type === "router",
+            writes_to: gn.writes_to ?? "",
+            config: gn.config ?? {},
+          },
+        });
+      }
+      const newEdges: Edge[] = graph.edges.map((ge) => ({
+        id: ge.id,
+        source: ge.source,
+        target: ge.target,
+        sourceHandle: ge.source_handle ?? undefined,
+        type: "smoothstep",
+      }));
+      setNodes(newNodes);
+      setEdges(newEdges);
+    });
+  }, [onImportReady, nodeTypes, setNodes, setEdges]);
 
   // Handle drop from palette
   const onDragOver = useCallback((e: React.DragEvent) => {

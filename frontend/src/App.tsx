@@ -28,7 +28,9 @@ export default function App() {
   const [showStateModal, setShowStateModal] = useState(true);
   const [showChat, setShowChat] = useState(false);
   const [showDeploy, setShowDeploy] = useState(false);
+  const [graphImporter, setGraphImporter] = useState<((g: GraphDef) => void) | null>(null);
   const isResizing = useRef(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const stateVariableNames = stateFields.map((f) => f.name);
   const stateFieldsRef = useRef(stateFields);
@@ -75,6 +77,44 @@ export default function App() {
     setActivePanel("export");
   }, [graphGetter]);
 
+  const handleSaveJson = useCallback(() => {
+    if (!graphGetter) return;
+    const graph = graphGetter();
+    graph.state_fields = stateFieldsRef.current;
+    const json = JSON.stringify(graph, null, 2);
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "graph.json";
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [graphGetter]);
+
+  const handleLoadJson = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file || !graphImporter) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const graph = JSON.parse(reader.result as string) as GraphDef;
+          if (graph.state_fields?.length) {
+            setStateFields(graph.state_fields);
+          }
+          graphImporter(graph);
+          setShowStateModal(false);
+        } catch (err) {
+          console.error("Failed to parse graph JSON:", err);
+        }
+      };
+      reader.readAsText(file);
+      // Reset input so the same file can be re-loaded
+      e.target.value = "";
+    },
+    [graphImporter]
+  );
+
   return (
     <ReactFlowProvider>
       <StateProvider value={{ names: stateVariableNames, fields: stateFields }}>
@@ -83,6 +123,19 @@ export default function App() {
         <header className="header">
           <h1>Agent Builder</h1>
           <div className="header-actions">
+            <button className="btn btn-secondary" onClick={handleSaveJson}>
+              Save JSON
+            </button>
+            <button className="btn btn-secondary" onClick={() => fileInputRef.current?.click()}>
+              Load JSON
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".json"
+              style={{ display: "none" }}
+              onChange={handleLoadJson}
+            />
             <button className="btn btn-secondary" onClick={handleExport}>
               Export Python
             </button>
@@ -111,6 +164,7 @@ export default function App() {
             stateVariableNames={stateVariableNames}
             onNodeSelect={setSelectedNodeId}
             onGraphReady={(getter) => setGraphGetter(() => getter)}
+            onImportReady={(importer) => setGraphImporter(() => importer)}
           />
 
           {/* Resize handle */}

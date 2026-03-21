@@ -15,7 +15,8 @@ import mlflow
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.errors import ResourceAlreadyExists
 from databricks.sdk.service.serving import (
-    AutoCaptureConfigInput,
+    AiGatewayConfig,
+    AiGatewayInferenceTableConfig,
     EndpointCoreConfigInput,
     ServedEntityInput,
 )
@@ -156,11 +157,12 @@ def deploy_graph(req: DeployRequest):
             ],
         }
 
-        # 5. Log model to MLflow — use pinned requirements from uv
-        requirements_path = _BACKEND_DIR.parent / "requirements.txt"
+        # 5. Log model to MLflow — use pinned requirements compiled from pyproject.toml
+        requirements_path = _BACKEND_DIR.parent / "requirements-serving.txt"
         if not requirements_path.exists():
             raise FileNotFoundError(
-                "requirements.txt not found. Run: uv pip compile pyproject.toml -o requirements.txt --python-version 3.11"
+                "requirements-serving.txt not found. Run: "
+                "uv pip compile pyproject.toml -o requirements-serving.txt --python-version 3.11"
             )
 
         with mlflow.start_run() as run:
@@ -196,7 +198,8 @@ def deploy_graph(req: DeployRequest):
 
         # 7. Create or update serving endpoint
         w = WorkspaceClient()
-        endpoint_name = req.model_name.replace(".", "_")
+        # Use just the model short name (last segment) as the endpoint name
+        endpoint_name = req.model_name.split(".")[-1].replace("_", "-")
 
         env_vars = {}
         if req.lakebase_conn_string:
@@ -210,20 +213,39 @@ def deploy_graph(req: DeployRequest):
             workload_size="Small",
         )
 
+        # AI Gateway inference table config (replaces legacy AutoCaptureConfig)
+        parts = req.model_name.split(".")
+        ai_gateway = AiGatewayConfig(
+            inference_table_config=AiGatewayInferenceTableConfig(
+                catalog_name=parts[0] if len(parts) >= 3 else None,
+                schema_name=parts[1] if len(parts) >= 3 else None,
+                table_name_prefix=endpoint_name,
+                enabled=True,
+            ),
+        )
+
         try:
             w.serving_endpoints.create(
                 name=endpoint_name,
                 config=EndpointCoreConfigInput(
                     name=endpoint_name,
                     served_entities=[served_entity],
-                    auto_capture_config=AutoCaptureConfigInput(enabled=True),
                 ),
+                ai_gateway=ai_gateway,
             )
         except ResourceAlreadyExists:
             w.serving_endpoints.update_config(
                 name=endpoint_name,
                 served_entities=[served_entity],
-                auto_capture_config=AutoCaptureConfigInput(enabled=True),
+            )
+            w.serving_endpoints.put_ai_gateway(
+                name=endpoint_name,
+                inference_table_config=AiGatewayInferenceTableConfig(
+                    catalog_name=parts[0] if len(parts) >= 3 else None,
+                    schema_name=parts[1] if len(parts) >= 3 else None,
+                    table_name_prefix=endpoint_name,
+                    enabled=True,
+                ),
             )
 
         host = w.config.host.rstrip("/")
