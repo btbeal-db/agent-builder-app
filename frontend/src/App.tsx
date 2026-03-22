@@ -105,28 +105,33 @@ export default function App() {
           </div>
           {view === "builder" && (
             <div className="header-actions">
-              <button className="btn btn-secondary" onClick={handleSaveJson}>
-                Save JSON
-              </button>
-              <button className="btn btn-secondary" onClick={() => fileInputRef.current?.click()}>
-                Load JSON
-              </button>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".json"
-                style={{ display: "none" }}
-                onChange={handleLoadJson}
-              />
-              <button className="btn btn-secondary" onClick={handleExport}>
-                Export Python
-              </button>
-              <button className="btn btn-primary" onClick={() => setShowChat(true)}>
-                Chat Playground
-              </button>
-              <button className="btn btn-deploy" onClick={() => setShowDeploy(true)}>
-                Deploy
-              </button>
+              <div className="header-group">
+                <button className="btn btn-ghost" onClick={handleSaveJson}>
+                  Save
+                </button>
+                <button className="btn btn-ghost" onClick={() => fileInputRef.current?.click()}>
+                  Load
+                </button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".json"
+                  style={{ display: "none" }}
+                  onChange={handleLoadJson}
+                />
+                <button className="btn btn-ghost" onClick={handleExport}>
+                  Export
+                </button>
+              </div>
+              <div className="header-divider" />
+              <div className="header-group">
+                <button className="btn btn-primary" onClick={() => setShowChat(true)}>
+                  Playground
+                </button>
+                <button className="btn btn-deploy" onClick={() => setShowDeploy(true)}>
+                  Deploy
+                </button>
+              </div>
             </div>
           )}
         </header>
