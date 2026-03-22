@@ -5,8 +5,6 @@ from __future__ import annotations
 import json
 import logging
 import tempfile
-
-logging.basicConfig(level=logging.INFO)
 import uuid
 from pathlib import Path
 
