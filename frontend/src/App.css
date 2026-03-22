@@ -1696,10 +1696,10 @@ code, pre, .mono {
   color: var(--text-muted);
 }
 
-.deploy-warning {
+.deploy-error-hint {
   display: block;
   font-size: 0.72rem;
-  color: #f59e0b;
+  color: #ef4444;
   margin-top: 4px;
 }
 

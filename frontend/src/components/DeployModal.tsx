@@ -60,7 +60,8 @@ export default function DeployModal({ graphGetter, stateFieldsRef, onClose }: Pr
   const [modelVersion, setModelVersion] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
 
-  const needsLakebase = hasConversationalNode(graphGetter) && !lakebaseConnString;
+  const isConversational = hasConversationalNode(graphGetter);
+  const needsLakebase = isConversational && !lakebaseConnString.trim();
 
   const handleDeploy = useCallback(async () => {
     const stateFields = stateFieldsRef.current ?? [];
@@ -157,13 +158,15 @@ export default function DeployModal({ graphGetter, stateFieldsRef, onClose }: Pr
                   onChange={(e) => setLakebaseConnString(e.target.value)}
                 />
                 <span className="deploy-hint">
-                  Optional. Enables multi-turn conversation memory.
+                  {isConversational
+                    ? "Required — your graph has conversational LLM nodes."
+                    : "Optional. Enables multi-turn conversation memory."}
                 </span>
                 {needsLakebase && (
-                  <span className="deploy-warning">
-                    Your graph has conversational LLM nodes. Without a Lakebase
-                    connection, conversation history will not persist between
-                    requests on Model Serving.
+                  <span className="deploy-error-hint">
+                    Conversational agents require a Lakebase connection to persist
+                    conversation history. Model Serving is stateless — without it,
+                    multi-turn will not work.
                   </span>
                 )}
               </label>
@@ -173,7 +176,7 @@ export default function DeployModal({ graphGetter, stateFieldsRef, onClose }: Pr
               <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
               <button
                 className="btn btn-primary"
-                disabled={!modelName || !experimentPath}
+                disabled={!modelName || !experimentPath || needsLakebase}
                 onClick={handleDeploy}
               >
                 Deploy
