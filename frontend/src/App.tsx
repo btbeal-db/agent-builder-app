@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { ReactFlowProvider } from "@xyflow/react";
-import { Home, Hammer, HelpCircle } from "lucide-react";
+import { Home, Hammer, HelpCircle, Trash2 } from "lucide-react";
 import Canvas from "./components/Canvas";
 import NodePalette from "./components/NodePalette";
 import StateModelModal from "./components/StateModelModal";
-import StateSummary from "./components/StateSummary";
+import StatePanel from "./components/StatePanel";
 import ChatPlayground from "./components/ChatPlayground";
 import DeployModal from "./components/DeployModal";
 import HomePage from "./components/HomePage";
@@ -104,6 +104,17 @@ export default function App() {
     }
   }, []);
 
+  const handleClearAll = useCallback(() => {
+    if (!graphImporter) return;
+    graphImporter({ nodes: [], edges: [], state_fields: [] });
+    setStateFields([
+      { name: "input", type: "str", description: "The initial input", sub_fields: [] },
+    ]);
+    setSelectedNodeId(null);
+    hasOpenedBuilder.current = false;
+    setShowStateModal(true);
+  }, [graphImporter]);
+
   return (
     <ReactFlowProvider>
       <StateProvider value={{ names: stateVariableNames, fields: stateFields }}>
@@ -130,6 +141,10 @@ export default function App() {
                 />
                 <button className="btn btn-ghost" onClick={handleExport}>
                   Export
+                </button>
+                <button className="btn btn-ghost btn-danger-ghost" onClick={handleClearAll}>
+                  <Trash2 size={14} />
+                  Clear All
                 </button>
               </div>
               <div className="header-divider" />
@@ -181,26 +196,25 @@ export default function App() {
             <HelpPage onGoToBuilder={openBuilder} />
           )}
 
-          {view === "builder" && (
-            <>
-              <div className="left-panel" onKeyDown={(e) => e.stopPropagation()}>
-                <StateSummary
-                  fields={stateFields}
-                  onEdit={() => setShowStateModal(true)}
-                />
-                <NodePalette nodeTypes={nodeTypes} />
-              </div>
-
-              <Canvas
-                nodeTypes={nodeTypes}
-                stateVariableNames={stateVariableNames}
-                selectedNodeId={selectedNodeId}
-                onNodeSelect={setSelectedNodeId}
-                onGraphReady={(getter) => setGraphGetter(() => getter)}
-                onImportReady={(importer) => setGraphImporter(() => importer)}
+          <div className="builder-container" style={{ display: view === "builder" ? "contents" : "none" }}>
+            <div className="left-panel" onKeyDown={(e) => e.stopPropagation()}>
+              <StatePanel
+                fields={stateFields}
+                onChange={setStateFields}
               />
-            </>
-          )}
+              <NodePalette nodeTypes={nodeTypes} />
+            </div>
+
+            <Canvas
+              nodeTypes={nodeTypes}
+              stateVariableNames={stateVariableNames}
+              selectedNodeId={selectedNodeId}
+              onNodeSelect={setSelectedNodeId}
+              onGraphReady={(getter) => setGraphGetter(() => getter)}
+              onImportReady={(importer) => setGraphImporter(() => importer)}
+              visible={view === "builder"}
+            />
+          </div>
         </div>
       </div>
 

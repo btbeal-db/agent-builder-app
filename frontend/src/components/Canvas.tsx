@@ -48,6 +48,7 @@ interface Props {
   selectedNodeId: string | null;
   onGraphReady: (getter: () => GraphDef) => void;
   onImportReady?: (importer: (graph: GraphDef) => void) => void;
+  visible?: boolean;
 }
 
 let nodeIdCounter = 0;
@@ -83,12 +84,21 @@ function usePopoverPosition(selectedNodeId: string | null, wrapperRef: React.Ref
   return pos;
 }
 
-export default function Canvas({ nodeTypes, stateVariableNames, onNodeSelect, selectedNodeId, onGraphReady, onImportReady }: Props) {
+export default function Canvas({ nodeTypes, stateVariableNames, onNodeSelect, selectedNodeId, onGraphReady, onImportReady, visible = true }: Props) {
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>(INITIAL_NODES);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
-  const { screenToFlowPosition } = useReactFlow();
+  const { screenToFlowPosition, fitView } = useReactFlow();
   const [selectedTool, setSelectedTool] = useState<{ nodeId: string; toolId: string } | null>(null);
+
+  // Re-fit the viewport when the canvas becomes visible (e.g. switching back from Home/Help)
+  useEffect(() => {
+    if (visible) {
+      // Small delay so the container has layout dimensions before fitView calculates bounds
+      const id = setTimeout(() => fitView({ duration: 200 }), 50);
+      return () => clearTimeout(id);
+    }
+  }, [visible, fitView]);
 
   const customNodeTypes = useMemo(
     () => ({ agentNode: AgentNode, sentinelNode: SentinelNode }),

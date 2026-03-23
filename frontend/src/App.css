@@ -653,6 +653,17 @@ code, pre, .mono {
   color: var(--text);
 }
 
+.btn-danger-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.btn-danger-ghost:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.12);
+  color: #ef4444;
+}
+
 .btn-sm {
   padding: 0.25rem 0.6rem;
   font-size: 0.75rem;
@@ -780,6 +791,154 @@ code, pre, .mono {
   align-items: center;
   gap: 0.75rem;
   padding: 0.45rem 0;
+}
+
+.modal-add-field-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+  padding: 0.55rem 0.75rem;
+  margin-top: 0.5rem;
+  font-size: 0.8rem;
+  font-family: inherit;
+  font-weight: 500;
+  color: var(--accent);
+  background: transparent;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.modal-add-field-btn:hover {
+  background: var(--accent-subtle);
+  border-color: var(--accent);
+}
+
+.modal-add-form {
+  margin-top: 0.5rem;
+  padding: 0.75rem;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+}
+
+.modal-add-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+}
+
+.modal-add-form-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.modal-add-form-row label {
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.modal-add-form-row input,
+.modal-add-form-row select {
+  font-size: 0.8rem;
+  font-family: inherit;
+  padding: 0.35rem 0.5rem;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  outline: none;
+}
+
+.modal-add-form-row input:focus,
+.modal-add-form-row select:focus {
+  border-color: var(--accent);
+  box-shadow: var(--ring);
+}
+
+.modal-add-form-row-full {
+  grid-column: 1 / -1;
+}
+
+.modal-add-subfields {
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+}
+
+.modal-add-subfield-label {
+  display: block;
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 0.35rem;
+}
+
+.modal-add-subfield-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.3rem;
+}
+
+.modal-add-subfield-row input,
+.modal-add-subfield-row select {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.78rem;
+  font-family: inherit;
+  padding: 0.3rem 0.4rem;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  outline: none;
+}
+
+.modal-add-subfield-row select {
+  flex: 0 0 100px;
+}
+
+.modal-add-subfield-row input:focus {
+  border-color: var(--accent);
+}
+
+.modal-add-subfield-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.72rem;
+  font-family: inherit;
+  color: var(--accent);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0.2rem 0;
+  margin-top: 0.15rem;
+}
+
+.modal-add-subfield-btn:hover {
+  text-decoration: underline;
+}
+
+.modal-add-form-actions {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.6rem;
+}
+
+.modal-add-form-actions .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
 }
 
 .modal-field-row {
@@ -955,52 +1114,397 @@ code, pre, .mono {
   border-top: 1px solid var(--border);
 }
 
-/* ── State Summary (left panel) ───────────────────────────────── */
-.state-summary {
-  padding: 0.75rem;
+/* ── State Panel (left panel) ─────────────────────────────────── */
+.state-panel {
   border-bottom: 1px solid var(--border);
 }
 
-.state-summary-header {
+.state-panel-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  margin-bottom: 0.5rem;
+  gap: 0.35rem;
+  width: 100%;
+  padding: 0.6rem 0.75rem;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-family: inherit;
+  transition: background 0.12s ease;
 }
 
-.state-summary-header h2 {
+.state-panel-header:hover {
+  background: var(--bg-hover);
+}
+
+.state-panel-header h2 {
   font-size: 0.68rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   font-weight: 600;
   color: var(--text-muted);
+  margin: 0;
 }
 
-.state-summary-fields {
+.state-panel-body {
+  padding: 0 0.6rem 0.6rem;
+}
+
+/* ── Field rows ── */
+.state-panel-field {
+  border-radius: var(--radius-sm);
+  margin-bottom: 2px;
+  transition: background 0.12s ease;
+}
+
+.state-panel-field-row {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.25rem;
-}
-
-.state-summary-field {
-  display: inline-flex;
   align-items: center;
-  gap: 0.3rem;
-  padding: 0.15rem 0.5rem;
-  background: var(--code-accent-subtle);
-  border: 1px solid rgba(96, 165, 250, 0.12);
-  border-radius: 4px;
+  justify-content: space-between;
+  padding: 0.3rem 0.5rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.12s ease;
 }
 
-.state-summary-name {
-  font-size: 0.7rem;
+.state-panel-field-row:hover {
+  background: var(--bg-hover);
+}
+
+.state-panel-field-locked .state-panel-field-row {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.state-panel-field-locked .state-panel-field-row:hover {
+  background: transparent;
+}
+
+.state-panel-field-expanded {
+  background: var(--bg-elevated);
+  border-radius: var(--radius-md);
+  margin-bottom: 4px;
+}
+
+.state-panel-name {
+  font-size: 0.72rem;
   font-family: "JetBrains Mono", monospace;
   color: var(--code-accent);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.state-summary-type {
-  font-size: 0.6rem;
+.state-panel-type-badge {
+  font-size: 0.58rem;
+  font-weight: 500;
   color: var(--text-muted);
+  background: var(--bg);
+  padding: 0.1rem 0.4rem;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* ── Inline editor ── */
+.state-panel-field-editor {
+  padding: 0.35rem 0.5rem 0.5rem;
+}
+
+.state-panel-editor-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.3rem;
+}
+
+.state-panel-editor-row label {
+  font-size: 0.62rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  width: 34px;
+  flex-shrink: 0;
+}
+
+.state-panel-editor-row input,
+.state-panel-editor-row select {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.72rem;
+  font-family: inherit;
+  padding: 0.25rem 0.4rem;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.state-panel-editor-row input:focus,
+.state-panel-editor-row select:focus {
+  border-color: var(--accent);
+  box-shadow: var(--ring);
+}
+
+.state-panel-locked-value {
+  font-size: 0.72rem;
+  font-family: "JetBrains Mono", monospace;
+  color: var(--text-muted);
+}
+
+/* ── Sub-fields (structured type) ── */
+.state-panel-subfields {
+  margin-top: 0.25rem;
+  padding-top: 0.25rem;
+  border-top: 1px solid var(--border);
+}
+
+.state-panel-subfield-label {
+  display: block;
+  font-size: 0.62rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 0.3rem;
+}
+
+.state-panel-subfield-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin-bottom: 0.4rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.state-panel-subfield-row:last-of-type {
+  border-bottom: none;
+  margin-bottom: 0.2rem;
+}
+
+.state-panel-sub-top {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.state-panel-sub-desc {
+  width: 100%;
+  font-size: 0.68rem;
+  font-family: inherit;
+  padding: 0.2rem 0.35rem;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  outline: none;
+  box-sizing: border-box;
+}
+
+.state-panel-sub-desc:focus {
+  border-color: var(--accent);
+}
+
+.state-panel-sub-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.7rem;
+  font-family: inherit;
+  padding: 0.2rem 0.35rem;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  outline: none;
+}
+
+.state-panel-sub-name:focus {
+  border-color: var(--accent);
+}
+
+.state-panel-sub-type {
+  width: 72px;
+  flex-shrink: 0;
+  font-size: 0.68rem;
+  font-family: inherit;
+  padding: 0.2rem 0.2rem;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  outline: none;
+}
+
+.state-panel-sub-remove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: 3px;
+  flex-shrink: 0;
+  transition: all 0.12s ease;
+}
+
+.state-panel-sub-remove:hover {
+  background: rgba(239, 68, 68, 0.12);
+  color: #ef4444;
+}
+
+.state-panel-sub-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.66rem;
+  font-family: inherit;
+  color: var(--accent);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0.2rem 0;
+  margin-top: 0.15rem;
+}
+
+.state-panel-sub-add:hover {
+  text-decoration: underline;
+}
+
+/* ── Delete field button ── */
+.state-panel-delete {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.66rem;
+  font-family: inherit;
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0.25rem 0 0;
+  margin-top: 0.2rem;
+  transition: color 0.12s ease;
+}
+
+.state-panel-delete:hover {
+  color: #ef4444;
+}
+
+/* ── Add field ── */
+.state-panel-add-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  width: 100%;
+  padding: 0.35rem 0.5rem;
+  margin-top: 0.25rem;
+  font-size: 0.72rem;
+  font-family: inherit;
+  color: var(--accent);
+  background: transparent;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.state-panel-add-btn:hover {
+  background: var(--accent-subtle);
+  border-color: var(--accent);
+}
+
+.state-panel-add-form {
+  margin-top: 0.35rem;
+  padding: 0.5rem;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+}
+
+.state-panel-add-name,
+.state-panel-add-desc {
+  width: 100%;
+  font-size: 0.72rem;
+  font-family: inherit;
+  padding: 0.25rem 0.4rem;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  outline: none;
+  margin-bottom: 0.3rem;
+  box-sizing: border-box;
+}
+
+.state-panel-add-name:focus,
+.state-panel-add-desc:focus {
+  border-color: var(--accent);
+  box-shadow: var(--ring);
+}
+
+.state-panel-add-type {
+  width: 100%;
+  font-size: 0.72rem;
+  font-family: inherit;
+  padding: 0.25rem 0.4rem;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  outline: none;
+  margin-bottom: 0.3rem;
+}
+
+.state-panel-add-actions {
+  display: flex;
+  gap: 0.35rem;
+  margin-top: 0.15rem;
+}
+
+.state-panel-add-confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.7rem;
+  font-family: inherit;
+  font-weight: 500;
+  padding: 0.22rem 0.5rem;
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: opacity 0.12s ease;
+}
+
+.state-panel-add-confirm:hover {
+  opacity: 0.9;
+}
+
+.state-panel-add-cancel {
+  font-size: 0.7rem;
+  font-family: inherit;
+  padding: 0.22rem 0.5rem;
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.state-panel-add-cancel:hover {
+  background: var(--bg-hover);
+  color: var(--text);
 }
 
 .preview-input {
@@ -1022,7 +1526,7 @@ code, pre, .mono {
 
 /* ── Left panel (state vars + palette) ────────────────────────── */
 .left-panel {
-  width: 240px;
+  width: 320px;
   flex-shrink: 0;
   background: var(--bg-surface);
   border-right: 1px solid var(--border);

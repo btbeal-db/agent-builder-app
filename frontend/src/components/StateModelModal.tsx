@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Plus, Check, X } from "lucide-react";
 import type { StateFieldDef, StateSubField } from "../types";
 
 // ── Presets ─────────────────────────────────────────────────────────
@@ -62,9 +63,11 @@ interface Props {
 }
 
 export default function StateModelModal({ fields, onChange, onClose }: Props) {
+  const [adding, setAdding] = useState(false);
   const [newName, setNewName] = useState("");
   const [newType, setNewType] = useState("str");
   const [newDesc, setNewDesc] = useState("");
+  const [newSubFields, setNewSubFields] = useState<StateSubField[]>([]);
 
   const updateField = (index: number, updates: Partial<StateFieldDef>) => {
     onChange(fields.map((f, i) => (i === index ? { ...f, ...updates } : f)));
@@ -73,10 +76,20 @@ export default function StateModelModal({ fields, onChange, onClose }: Props) {
   const addField = () => {
     const name = newName.trim().replace(/\s+/g, "_").toLowerCase();
     if (!name || fields.some((f) => f.name === name)) return;
-    onChange([...fields, { name, type: newType, description: newDesc, sub_fields: [] }]);
+    onChange([...fields, { name, type: newType, description: newDesc, sub_fields: newType === "structured" ? newSubFields : [] }]);
     setNewName("");
     setNewType("str");
     setNewDesc("");
+    setNewSubFields([]);
+    setAdding(false);
+  };
+
+  const cancelAdd = () => {
+    setNewName("");
+    setNewType("str");
+    setNewDesc("");
+    setNewSubFields([]);
+    setAdding(false);
   };
 
   const removeField = (index: number) => {
@@ -259,46 +272,109 @@ export default function StateModelModal({ fields, onChange, onClose }: Props) {
             ))}
           </div>
 
-          <div className="modal-add-row">
-            <div className="modal-col-name">
-              <input
-                className="modal-field-name-input"
-                value={newName}
-                placeholder="field_name"
-                onChange={(e) => setNewName(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && addField()}
-              />
+          {adding ? (
+            <div className="modal-add-form">
+              <div className="modal-add-form-grid">
+                <div className="modal-add-form-row">
+                  <label>Name</label>
+                  <input
+                    className="modal-field-name-input"
+                    value={newName}
+                    placeholder="field_name"
+                    autoFocus
+                    onChange={(e) => setNewName(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && addField()}
+                  />
+                </div>
+                <div className="modal-add-form-row">
+                  <label>Type</label>
+                  <select
+                    className="modal-field-type"
+                    value={newType}
+                    onChange={(e) => {
+                      const t = e.target.value;
+                      setNewType(t);
+                      if (t !== "structured") setNewSubFields([]);
+                      if (t in DEFAULT_DESCRIPTIONS && (!newDesc || newDesc === DEFAULT_DESCRIPTIONS[newType])) {
+                        setNewDesc(DEFAULT_DESCRIPTIONS[t]);
+                      }
+                    }}
+                  >
+                    {FIELD_TYPES.map((ft) => (
+                      <option key={ft.value} value={ft.value}>{ft.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="modal-add-form-row modal-add-form-row-full">
+                  <label>Description</label>
+                  <input
+                    className="modal-field-desc"
+                    value={newDesc}
+                    placeholder="What is this field for?"
+                    onChange={(e) => setNewDesc(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && addField()}
+                  />
+                </div>
+              </div>
+              {newType === "structured" && (
+                <div className="modal-add-subfields">
+                  <label className="modal-add-subfield-label">Sub-fields</label>
+                  {newSubFields.map((sf, si) => (
+                    <div key={si} className="modal-add-subfield-row">
+                      <input
+                        value={sf.name}
+                        placeholder="name"
+                        onChange={(e) => {
+                          const updated = newSubFields.map((s, j) => j === si ? { ...s, name: e.target.value } : s);
+                          setNewSubFields(updated);
+                        }}
+                      />
+                      <select
+                        value={sf.type}
+                        onChange={(e) => {
+                          const updated = newSubFields.map((s, j) => j === si ? { ...s, type: e.target.value } : s);
+                          setNewSubFields(updated);
+                        }}
+                      >
+                        {SUB_FIELD_TYPES.map((ft) => (
+                          <option key={ft.value} value={ft.value}>{ft.label}</option>
+                        ))}
+                      </select>
+                      <input
+                        value={sf.description}
+                        placeholder="description"
+                        onChange={(e) => {
+                          const updated = newSubFields.map((s, j) => j === si ? { ...s, description: e.target.value } : s);
+                          setNewSubFields(updated);
+                        }}
+                      />
+                      <button className="modal-field-remove" onClick={() => setNewSubFields(newSubFields.filter((_, j) => j !== si))}>
+                        &times;
+                      </button>
+                    </div>
+                  ))}
+                  <button
+                    className="modal-add-subfield-btn"
+                    onClick={() => setNewSubFields([...newSubFields, { name: "", type: "str", description: "" }])}
+                  >
+                    <Plus size={12} /> Add sub-field
+                  </button>
+                </div>
+              )}
+              <div className="modal-add-form-actions">
+                <button className="btn btn-primary btn-sm" onClick={addField}>
+                  <Check size={12} /> Add Field
+                </button>
+                <button className="btn btn-ghost btn-sm" onClick={cancelAdd}>
+                  Cancel
+                </button>
+              </div>
             </div>
-            <div className="modal-col-type">
-              <select
-                className="modal-field-type"
-                value={newType}
-                onChange={(e) => {
-                  const t = e.target.value;
-                  setNewType(t);
-                  if (t in DEFAULT_DESCRIPTIONS && (!newDesc || newDesc === DEFAULT_DESCRIPTIONS[newType])) {
-                    setNewDesc(DEFAULT_DESCRIPTIONS[t]);
-                  }
-                }}
-              >
-                {FIELD_TYPES.map((ft) => (
-                  <option key={ft.value} value={ft.value}>{ft.label}</option>
-                ))}
-              </select>
-            </div>
-            <div className="modal-col-desc">
-              <input
-                className="modal-field-desc"
-                value={newDesc}
-                placeholder="What is this field for?"
-                onChange={(e) => setNewDesc(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && addField()}
-              />
-            </div>
-            <div className="modal-col-action">
-              <button className="btn btn-sm" onClick={addField}>+</button>
-            </div>
-          </div>
+          ) : (
+            <button className="modal-add-field-btn" onClick={() => setAdding(true)}>
+              <Plus size={14} /> Add field
+            </button>
+          )}
         </div>
 
         <div className="modal-footer">
