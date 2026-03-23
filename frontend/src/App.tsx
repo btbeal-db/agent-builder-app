@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { ReactFlowProvider } from "@xyflow/react";
-import { Home, Hammer } from "lucide-react";
+import { Home, Hammer, HelpCircle } from "lucide-react";
 import Canvas from "./components/Canvas";
 import NodePalette from "./components/NodePalette";
 import StateModelModal from "./components/StateModelModal";
@@ -8,11 +8,12 @@ import StateSummary from "./components/StateSummary";
 import ChatPlayground from "./components/ChatPlayground";
 import DeployModal from "./components/DeployModal";
 import HomePage from "./components/HomePage";
+import HelpPage from "./components/HelpPage";
 import { StateProvider } from "./StateContext";
 import { fetchNodeTypes, exportGraph } from "./api";
 import type { NodeTypeMetadata, GraphDef, StateFieldDef } from "./types";
 
-type AppView = "home" | "builder";
+type AppView = "home" | "builder" | "help";
 
 export default function App() {
   const [nodeTypes, setNodeTypes] = useState<NodeTypeMetadata[]>([]);
@@ -162,10 +163,22 @@ export default function App() {
               <Hammer size={18} />
               <span>Builder</span>
             </button>
+            <button
+              className={`nav-rail-btn${view === "help" ? " active" : ""}`}
+              onClick={() => setView("help")}
+              title="Help"
+            >
+              <HelpCircle size={18} />
+              <span>Help</span>
+            </button>
           </nav>
 
           {view === "home" && (
             <HomePage onGetStarted={openBuilder} />
+          )}
+
+          {view === "help" && (
+            <HelpPage onGoToBuilder={openBuilder} />
           )}
 
           {view === "builder" && (
