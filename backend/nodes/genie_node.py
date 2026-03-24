@@ -127,10 +127,17 @@ class GenieNode(BaseNode):
             w = get_workspace_client()
             message = w.genie.start_conversation_and_wait(space_id, query)
         except Exception as exc:
-            logger.exception("Genie API call failed")
+            # If the wait failed, try to get more detail from the message
+            error_detail = str(exc)
+            if hasattr(exc, 'message'):
+                error_detail = exc.message
+            logger.exception(
+                "Genie API call failed (space=%s, query=%s): %s",
+                space_id, query[:100], error_detail,
+            )
             return {
-                writes_to: f"Genie API error: {exc}",
-                "messages": [{"role": "system", "content": f"Genie error: {exc}", "node": "genie"}],
+                writes_to: f"Genie API error: {error_detail}",
+                "messages": [{"role": "system", "content": f"Genie error: {error_detail}", "node": "genie"}],
             }
 
         if message.status == MessageStatus.FAILED:

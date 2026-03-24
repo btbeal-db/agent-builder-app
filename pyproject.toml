@@ -16,6 +16,16 @@ dependencies = [
     "databricks-langchain[memory]>=0.12.0",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "httpx>=0.27",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["backend/tests"]
+markers = ["integration: requires a live Databricks workspace"]
+
 [tool.hatch.build.targets.wheel]
 packages = ["backend"]
 
