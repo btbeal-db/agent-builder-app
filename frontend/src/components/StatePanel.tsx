@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ChevronDown, ChevronRight, Plus, X, Check } from "lucide-react";
+import { ChevronDown, ChevronRight, Plus, X, Check, Maximize2 } from "lucide-react";
 import type { StateFieldDef, StateSubField } from "../types";
 
 const FIELD_TYPES = [
@@ -29,9 +29,10 @@ const TYPE_LABELS: Record<string, string> = Object.fromEntries(
 interface Props {
   fields: StateFieldDef[];
   onChange: (fields: StateFieldDef[]) => void;
+  onOpenModal?: () => void;
 }
 
-export default function StatePanel({ fields, onChange }: Props) {
+export default function StatePanel({ fields, onChange, onOpenModal }: Props) {
   const [collapsed, setCollapsed] = useState(false);
   const [expandedField, setExpandedField] = useState<number | null>(null);
   const [adding, setAdding] = useState(false);
@@ -87,10 +88,21 @@ export default function StatePanel({ fields, onChange }: Props) {
 
   return (
     <div className="state-panel">
-      <button className="state-panel-header" onClick={() => setCollapsed(!collapsed)}>
-        {collapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
-        <h2>State Model</h2>
-      </button>
+      <div className="state-panel-header-row">
+        <button className="state-panel-header" onClick={() => setCollapsed(!collapsed)}>
+          {collapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+          <h2>State Model</h2>
+        </button>
+        {onOpenModal && (
+          <button
+            className="state-panel-expand-btn"
+            onClick={onOpenModal}
+            title="Open full editor"
+          >
+            <Maximize2 size={12} />
+          </button>
+        )}
+      </div>
 
       {!collapsed && (
         <div className="state-panel-body">

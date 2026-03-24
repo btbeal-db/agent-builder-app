@@ -9,6 +9,7 @@ import ChatPlayground from "./components/ChatPlayground";
 import DeployModal from "./components/DeployModal";
 import HomePage from "./components/HomePage";
 import HelpPage from "./components/HelpPage";
+import BuilderWalkthrough from "./components/BuilderWalkthrough";
 import { StateProvider } from "./StateContext";
 import { fetchNodeTypes, exportGraph } from "./api";
 import type { NodeTypeMetadata, GraphDef, StateFieldDef } from "./types";
@@ -29,6 +30,7 @@ export default function App() {
   const [showDeploy, setShowDeploy] = useState(false);
   const [graphImporter, setGraphImporter] = useState<((g: GraphDef) => void) | null>(null);
   const [view, setView] = useState<AppView>("home");
+  const [showWalkthrough, setShowWalkthrough] = useState(false);
   const hasOpenedBuilder = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -100,7 +102,7 @@ export default function App() {
     setView("builder");
     if (!hasOpenedBuilder.current) {
       hasOpenedBuilder.current = true;
-      setShowStateModal(true);
+      setShowWalkthrough(true);
     }
   }, []);
 
@@ -111,8 +113,6 @@ export default function App() {
       { name: "input", type: "str", description: "The initial input", sub_fields: [] },
     ]);
     setSelectedNodeId(null);
-    hasOpenedBuilder.current = false;
-    setShowStateModal(true);
   }, [graphImporter]);
 
   return (
@@ -201,6 +201,7 @@ export default function App() {
               <StatePanel
                 fields={stateFields}
                 onChange={setStateFields}
+                onOpenModal={() => setShowStateModal(true)}
               />
               <NodePalette nodeTypes={nodeTypes} />
             </div>
@@ -215,6 +216,10 @@ export default function App() {
               visible={view === "builder"}
             />
           </div>
+
+          {showWalkthrough && view === "builder" && (
+            <BuilderWalkthrough onDismiss={() => setShowWalkthrough(false)} />
+          )}
         </div>
       </div>
 

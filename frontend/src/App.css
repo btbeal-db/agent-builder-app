@@ -115,6 +115,7 @@ code, pre, .mono {
   display: flex;
   flex: 1;
   overflow: hidden;
+  position: relative;
 }
 
 /* ── Nav Rail ────────────────────────────────────────────────── */
@@ -1119,11 +1120,16 @@ code, pre, .mono {
   border-bottom: 1px solid var(--border);
 }
 
+.state-panel-header-row {
+  display: flex;
+  align-items: center;
+}
+
 .state-panel-header {
   display: flex;
   align-items: center;
   gap: 0.35rem;
-  width: 100%;
+  flex: 1;
   padding: 0.6rem 0.75rem;
   border: none;
   background: transparent;
@@ -1135,6 +1141,27 @@ code, pre, .mono {
 
 .state-panel-header:hover {
   background: var(--bg-hover);
+}
+
+.state-panel-expand-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin-right: 0.5rem;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: all 0.12s ease;
+  flex-shrink: 0;
+}
+
+.state-panel-expand-btn:hover {
+  background: var(--bg-hover);
+  color: var(--accent);
 }
 
 .state-panel-header h2 {
@@ -1600,6 +1627,146 @@ code, pre, .mono {
 .canvas-wrapper {
   flex: 1;
   position: relative;
+}
+
+/* ── Builder walkthrough ─────────────────────────────────────── */
+.walkthrough {
+  position: absolute;
+  width: 320px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  padding: 1rem 1.1rem;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  z-index: 50;
+  transition: top 0.3s ease, left 0.3s ease, bottom 0.3s ease, right 0.3s ease;
+}
+
+/* Position variants — anchored relative to .main */
+.walkthrough-left-top {
+  top: 1rem;
+  left: 400px;   /* nav(64) + left-panel(320) + gap */
+}
+
+.walkthrough-left-bottom {
+  bottom: 1rem;
+  left: 400px;
+}
+
+.walkthrough-center {
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.walkthrough-top-right {
+  top: 1rem;
+  right: 1rem;
+}
+
+.walkthrough-close {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+
+.walkthrough-close:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.walkthrough-step {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+  margin-bottom: 0.75rem;
+}
+
+.walkthrough-icon {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent-subtle);
+  color: var(--accent);
+  border-radius: var(--radius-md);
+  flex-shrink: 0;
+}
+
+.walkthrough-step-num {
+  font-size: 0.62rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  margin-right: 0.4rem;
+}
+
+.walkthrough-title {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 0.2rem;
+}
+
+.walkthrough-text {
+  font-size: 0.74rem;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.walkthrough-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.walkthrough-dots {
+  display: flex;
+  gap: 0.3rem;
+}
+
+.walkthrough-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  border: none;
+  background: var(--border-strong);
+  cursor: pointer;
+  padding: 0;
+  transition: all 0.15s ease;
+}
+
+.walkthrough-dot.active {
+  background: var(--accent);
+  width: 16px;
+  border-radius: 3px;
+}
+
+.walkthrough-nav {
+  display: flex;
+  gap: 0.3rem;
+  align-items: center;
+}
+
+.walkthrough-nav .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  font-size: 0.72rem;
+}
+
+.walkthrough-next {
+  font-size: 0.72rem;
 }
 
 /* ── Config popover (floating tooltip off the selected node) ─── */
