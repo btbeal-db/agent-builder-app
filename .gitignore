@@ -209,5 +209,6 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
-#mlflow
-mlflow*
+# MLflow local artifacts
+mlruns/
+mlflow.db
