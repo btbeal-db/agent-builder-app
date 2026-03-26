@@ -1,8 +1,0 @@
-langgraph>=0.2.0
-langchain-core>=0.3.0
-langchain-community>=0.3.0
-databricks-sdk>=0.20.0
-databricks-langchain>=0.17.0
-langgraph-checkpoint-postgres>=2.0.0
-psycopg[binary]>=3.1.0
-mlflow>=3.10.1
