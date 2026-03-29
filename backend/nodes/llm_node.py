@@ -23,7 +23,11 @@ _TYPE_MAP: dict[str, type] = {
 
 
 def build_pydantic_model(sub_fields: list[dict[str, str]], model_name: str = "StructuredOutput") -> type | None:
-    """Build a Pydantic model from sub-field definitions."""
+    """Build a Pydantic model from sub-field definitions.
+
+    Works for both structured types (multiple sub-fields) and primitive
+    types wrapped as a single-field model (e.g. bool, int, float).
+    """
     if not sub_fields:
         return None
 
@@ -224,11 +228,20 @@ class LLMNode(BaseNode):
                     "messages": [{"role": "system", "content": f"LLM: tool binding error: {exc}", "node": "llm"}],
                 }
 
-        # Auto-detect structured output from the state field definition
-        is_structured = target_field is not None and getattr(target_field, "type", "") == "structured"
+        # Auto-detect structured output from the state field definition.
+        # Covers both multi-field structured types and primitive types
+        # (bool, int, float) that need typed extraction via with_structured_output.
+        target_type = getattr(target_field, "type", "str") if target_field else "str"
 
-        if is_structured:
+        if target_type == "structured":
             sub_fields = getattr(target_field, "sub_fields", [])
+        elif target_type in _TYPE_MAP and target_type != "str":
+            # Wrap primitive as a single-field structured output
+            sub_fields = [{"name": writes_to, "type": target_type, "description": getattr(target_field, "description", "") or writes_to}]
+        else:
+            sub_fields = []
+
+        if sub_fields and writes_to:
             model_cls = build_pydantic_model(sub_fields, model_name=writes_to.title().replace("_", ""))
             if model_cls is None:
                 return {
@@ -236,7 +249,6 @@ class LLMNode(BaseNode):
                     "messages": [{"role": "system", "content": "LLM: invalid structured field schema.", "node": "llm"}],
                 }
 
-            # Auto-inject schema description so the LLM knows what to produce
             schema_instruction = _build_schema_instruction(sub_fields, writes_to)
             system_prompt = f"{system_prompt}\n\n{schema_instruction}"
 
@@ -247,7 +259,11 @@ class LLMNode(BaseNode):
             ])
 
             result_dict = result.model_dump()
-            response_text = json.dumps(result_dict, indent=2)
+            # Single-field primitives: extract the value directly
+            if target_type != "structured":
+                response_text = str(result_dict[writes_to])
+            else:
+                response_text = json.dumps(result_dict, indent=2)
 
             return {
                 writes_to: response_text,
