@@ -1523,6 +1523,33 @@ code, pre, .mono {
   color: #ef4444;
 }
 
+.state-panel-editor-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding-top: 0.35rem;
+}
+
+.state-panel-save {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.7rem;
+  font-family: inherit;
+  font-weight: 500;
+  color: #fff;
+  background: var(--accent);
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  padding: 0.25rem 0.55rem;
+  transition: background 0.15s;
+}
+
+.state-panel-save:hover {
+  background: var(--accent-hover);
+}
+
 /* ── Add field ── */
 .state-panel-add-btn {
   display: flex;
@@ -3096,4 +3123,86 @@ h4.md-header { font-size: 0.82em; }
 
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(148, 163, 184, 0.2);
+}
+
+/* ── AI Chat Dropdown ───────────────────────────────────────── */
+.ai-chat-wrapper {
+  position: relative;
+}
+
+.ai-chat-dropdown {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  width: 420px;
+  height: 500px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18), 0 2px 8px rgba(0, 0, 0, 0.08);
+  z-index: 90;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.ai-chat-caret {
+  position: absolute;
+  top: -6px;
+  right: 18px;
+  width: 12px;
+  height: 12px;
+  background: var(--bg-surface);
+  border-top: 1px solid var(--border);
+  border-left: 1px solid var(--border);
+  transform: rotate(45deg);
+  z-index: 1;
+}
+
+.ai-chat-header {
+  padding: 0.65rem 1rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+}
+
+.ai-chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.ai-chat-empty {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  text-align: center;
+  margin-top: 2rem;
+  padding: 0 1rem;
+  line-height: 1.5;
+}
+
+.ai-chat-apply-btn {
+  margin-top: 0.5rem;
+  padding: 0.3rem 0.65rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #fff;
+  background: var(--accent);
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.ai-chat-apply-btn:hover {
+  background: var(--accent-hover);
+}
+
+.btn-active {
+  background: var(--bg-elevated);
+  color: var(--accent);
 }

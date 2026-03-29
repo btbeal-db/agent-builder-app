@@ -36,6 +36,8 @@ export default function StatePanel({ fields, onChange, onOpenModal }: Props) {
   const [collapsed, setCollapsed] = useState(false);
   const [expandedField, setExpandedField] = useState<number | null>(null);
   const [adding, setAdding] = useState(false);
+  // Local name buffer — committed on blur/Enter so typing is responsive
+  const [editingName, setEditingName] = useState<string | null>(null);
   const [newName, setNewName] = useState("");
   const [newType, setNewType] = useState("str");
   const [newDesc, setNewDesc] = useState("");
@@ -48,6 +50,7 @@ export default function StatePanel({ fields, onChange, onOpenModal }: Props) {
   const removeField = (index: number) => {
     if (fields[index].name === "input") return;
     setExpandedField(null);
+    setEditingName(null);
     onChange(fields.filter((_, i) => i !== index));
   };
 
@@ -60,7 +63,14 @@ export default function StatePanel({ fields, onChange, onOpenModal }: Props) {
     setNewDesc("");
     setNewSubFields([]);
     setAdding(false);
-    setExpandedField(fields.length); // index of the newly added field
+    setExpandedField(fields.length);
+  };
+
+  const commitName = (index: number) => {
+    if (editingName !== null) {
+      updateField(index, { name: editingName });
+      setEditingName(null);
+    }
   };
 
   const updateSubField = (fieldIdx: number, subIdx: number, updates: Partial<StateSubField>) => {
@@ -83,6 +93,7 @@ export default function StatePanel({ fields, onChange, onOpenModal }: Props) {
 
   const toggleField = (index: number) => {
     setExpandedField((prev) => (prev === index ? null : index));
+    setEditingName(null);
     setAdding(false);
   };
 
@@ -134,7 +145,7 @@ export default function StatePanel({ fields, onChange, onOpenModal }: Props) {
 
                 {isExpanded && (
                   <div className="state-panel-field-editor">
-                    {/* Name */}
+                    {/* Name — buffered locally, committed on blur/Enter */}
                     {field.name === "input" ? (
                       <div className="state-panel-editor-row">
                         <label>Name</label>
@@ -144,17 +155,21 @@ export default function StatePanel({ fields, onChange, onOpenModal }: Props) {
                       <div className="state-panel-editor-row">
                         <label>Name</label>
                         <input
-                          value={field.name}
+                          value={editingName !== null ? editingName : field.name}
                           placeholder="field_name"
-                          onChange={(e) => {
-                            const sanitized = e.target.value.replace(/\s+/g, "_").toLowerCase();
-                            updateField(i, { name: sanitized });
+                          onFocus={() => setEditingName(field.name)}
+                          onChange={(e) =>
+                            setEditingName(e.target.value.replace(/\s+/g, "_").toLowerCase())
+                          }
+                          onBlur={() => commitName(i)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") e.currentTarget.blur();
                           }}
                         />
                       </div>
                     )}
 
-                    {/* Type */}
+                    {/* Type — updates immediately */}
                     <div className="state-panel-editor-row">
                       <label>Type</label>
                       <select
@@ -180,7 +195,7 @@ export default function StatePanel({ fields, onChange, onOpenModal }: Props) {
                       </select>
                     </div>
 
-                    {/* Description */}
+                    {/* Description — updates immediately */}
                     <div className="state-panel-editor-row">
                       <label>Desc</label>
                       <input

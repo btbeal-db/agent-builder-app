@@ -41,6 +41,28 @@ export async function loadGraphFromRun(runId: string): Promise<{ success: boolea
   return res.json();
 }
 
+export interface AIChatResponse {
+  message: string;
+  graph: GraphDef | null;
+  error: string | null;
+}
+
+export async function sendAIChatMessage(
+  messages: Array<{ role: string; content: string }>,
+  currentGraph: GraphDef | null,
+): Promise<AIChatResponse> {
+  const res = await fetch(`${BASE}/ai-chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      messages,
+      current_graph: currentGraph,
+    }),
+  });
+  if (!res.ok) throw new Error(`AI Chat request failed: ${res.status}`);
+  return res.json();
+}
+
 export async function deployGraphStream(
   req: DeployRequest,
   onEvent: (event: DeployEvent) => void,

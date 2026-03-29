@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { ReactFlowProvider } from "@xyflow/react";
-import { Home, Hammer, HelpCircle, Trash2, CloudDownload, Save, Upload, MessageSquare, Rocket } from "lucide-react";
+import { Home, Hammer, HelpCircle, Trash2, CloudDownload, Save, Upload, MessageSquare, Rocket, Sparkles } from "lucide-react";
 import Canvas from "./components/Canvas";
 import NodePalette from "./components/NodePalette";
 import StateModelModal from "./components/StateModelModal";
@@ -10,6 +10,7 @@ import DeployModal from "./components/DeployModal";
 import HomePage from "./components/HomePage";
 import HelpPage from "./components/HelpPage";
 import BuilderWalkthrough from "./components/BuilderWalkthrough";
+import AIChatDropdown from "./components/AIChatDropdown";
 import { StateProvider } from "./StateContext";
 import { fetchNodeTypes, loadGraphFromRun } from "./api";
 import type { NodeTypeMetadata, GraphDef, StateFieldDef } from "./types";
@@ -25,6 +26,8 @@ export default function App() {
   ]);
   const [showStateModal, setShowStateModal] = useState(false);
   const [showChat, setShowChat] = useState(false);
+  const [showAIChat, setShowAIChat] = useState(false);
+  const aiChatWrapperRef = useRef<HTMLDivElement>(null);
   const [showDeploy, setShowDeploy] = useState(false);
   const [showRunIdPrompt, setShowRunIdPrompt] = useState(false);
   const [runIdInput, setRunIdInput] = useState("");
@@ -155,6 +158,29 @@ export default function App() {
         <header className="header">
           <div className="header-left">
             <span className="header-logo">Agent Builder</span>
+          </div>
+          <div className="ai-chat-wrapper" ref={aiChatWrapperRef}>
+            <button
+              className={`btn btn-ghost btn-with-icon${showAIChat ? " btn-active" : ""}`}
+              onClick={() => setShowAIChat((v) => !v)}
+            >
+              <Sparkles size={14} />
+              AI Chat
+            </button>
+            {showAIChat && (
+              <AIChatDropdown
+                graphGetter={graphGetter}
+                graphImporter={graphImporter}
+                stateFields={stateFields}
+                setStateFields={setStateFields}
+                onSwitchToBuilder={() => {
+                  setView("builder");
+                  hasOpenedBuilder.current = true;
+                }}
+                onClose={() => setShowAIChat(false)}
+                wrapperRef={aiChatWrapperRef}
+              />
+            )}
           </div>
           {view === "builder" && (
             <div className="header-actions">

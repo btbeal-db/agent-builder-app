@@ -4,8 +4,9 @@ import json
 from typing import Any
 
 from pydantic import Field, create_model
-from databricks_langchain import ChatDatabricks
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+
+from databricks_langchain import ChatDatabricks
 
 from .base import BaseNode, NodeConfigField
 from . import register
@@ -155,13 +156,22 @@ class LLMNode(BaseNode):
                 default=0.7,
             ),
             NodeConfigField(
-                name="conversational",
-                label="Conversational",
+                name="include_state_variables",
+                label="Include State Variables",
+                field_type="select",
+                required=False,
+                default="true",
+                options=["true", "false"],
+                help_text="Pass all user-defined state variables to the LLM. When disabled, use {field_name} templates in the system prompt instead.",
+            ),
+            NodeConfigField(
+                name="include_message_history",
+                label="Include Message History",
                 field_type="select",
                 required=False,
                 default="false",
                 options=["false", "true"],
-                help_text="Include conversation history in the prompt for multi-turn awareness.",
+                help_text="Include prior conversation turns in the prompt for multi-turn awareness.",
             ),
             NodeConfigField(
                 name="last_n_messages",
@@ -169,7 +179,7 @@ class LLMNode(BaseNode):
                 field_type="number",
                 required=False,
                 default=0,
-                help_text="Number of recent messages to include (0 = all). Only used when Conversational is enabled.",
+                help_text="Number of recent messages to include (0 = all). Only used when Include Message History is enabled.",
             ),
         ]
 
@@ -179,15 +189,19 @@ class LLMNode(BaseNode):
         endpoint = config.get("endpoint", "databricks-meta-llama-3-3-70b-instruct")
         temperature = float(config.get("temperature", 0.7))
         raw_prompt = config.get("system_prompt", "You are a helpful assistant.")
-        conversational = str(config.get("conversational", "false")).lower() == "true"
+        include_state_vars = str(config.get("include_state_variables", "true")).lower() == "true"
+        include_msg_history = str(config.get("include_message_history",
+                                             config.get("conversational", "false"))).lower() == "true"
         last_n = int(config.get("last_n_messages", 0) or 0)
 
         # Resolve {field_name} templates in the system prompt from state
         system_prompt = _resolve_templates(raw_prompt, state)
-        state_context = _build_state_context(state)
+
+        # Either pass all state fields automatically, or rely on templates only
+        state_context = _build_state_context(state) if include_state_vars else ""
 
         # Optionally append conversation history to the context
-        if conversational:
+        if include_msg_history:
             history_text = _format_conversation_history(state, last_n=last_n)
             if history_text:
                 state_context = f"{state_context}\n\nConversation History:\n{history_text}" if state_context else f"Conversation History:\n{history_text}"

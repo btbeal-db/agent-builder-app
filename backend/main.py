@@ -38,6 +38,7 @@ from mlflow.models.resources import (
 from langchain_core.messages import BaseMessage
 
 from .auth import set_user_token, get_workspace_client
+from .ai_chat import AIChatRequest, AIChatResponse, handle_ai_chat
 from .graph_builder import build_graph, filter_output, run_graph
 from .nodes import get_all_metadata
 from .schema import (
@@ -186,6 +187,12 @@ mlflow.set_tracking_uri(_prev_uri)
 def list_nodes():
     """Return metadata for every registered node type."""
     return get_all_metadata()
+
+
+@app.post("/api/ai-chat", response_model=AIChatResponse)
+def ai_chat(req: AIChatRequest) -> AIChatResponse:
+    """Generate or modify a graph definition from natural language."""
+    return handle_ai_chat(req)
 
 
 @app.post("/api/graph/validate")

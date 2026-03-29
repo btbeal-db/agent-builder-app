@@ -1,0 +1,63 @@
+===========================================
+StatePanel Boolean Type Testing - Session Notes
+Date: 2026-03-29
+===========================================
+
+TESTING ATTEMPTED:
+- Comprehensive code analysis of StatePanel.tsx
+- Backend API validation testing (PASSED)
+- Git history review of recent changes
+- Type definition and label mapping verification
+
+TOOLS USED:
+- Code inspection (grep, read)
+- Git log and diff analysis
+- Backend API testing via curl/Node.js (passed)
+- Code path tracing and flow analysis
+
+ANALYSIS COMPLETED:
+1. ✓ Verified "bool" type is defined in FIELD_TYPES (line 9)
+2. ✓ Verified "bool" maps to "True / False" label (line 25-26)
+3. ✓ Verified type persistence through add/edit/save flow
+4. ✓ Verified backend accepts boolean fields (API test passed)
+5. ✓ Identified potential race condition in addField() (line 66)
+6. ✓ Identified potential draft sync issue
+
+FRONTEND LIMITATIONS ENCOUNTERED:
+- Cannot automate browser testing without puppeteer/playwright (not installed)
+- Cannot use mcp-cli for Chrome DevTools control (not found in PATH)
+- Cannot directly control running Chrome instance
+- Vite dev server running on port 3002 (restarted from 5173)
+
+WHAT WORKS (verified):
+✓ Backend accepts boolean state fields
+✓ Type label mapping is correct
+✓ Code structure supports boolean types
+✓ Save/update flow logic is sound
+✓ Add field form properly handles bool type
+
+POTENTIAL ISSUES IDENTIFIED:
+1. Race condition in addField() - uses fields.length before parent re-renders
+2. Possible draft state sync issue with parent props
+3. No specific validation errors in type handling
+4. CSS or rendering issue cannot be verified without browser
+
+NEXT ACTIONS REQUIRED:
+1. Manual browser testing with F12 DevTools open
+2. Check console for errors during add/edit/save
+3. Verify type badge displays "True / False" correctly
+4. Check React DevTools to inspect component state
+5. Inspect DOM to verify type label is rendered
+6. Network tab to check for failed API calls
+
+FILES ANALYZED:
+- frontend/src/components/StatePanel.tsx (full, 386 lines)
+- frontend/src/App.tsx (partial, state management)
+- frontend/src/types.ts (type definitions)
+- backend/graph_builder.py (state type building)
+- backend/schema.py (StateFieldDef model)
+
+DETAILED REPORT CREATED:
+→ /Users/brennan.beal/code/agent-builder-app/BOOLEAN_FIELD_TEST_REPORT.md
+(Contains manual test checklist and debugging instructions)
+
