@@ -104,7 +104,7 @@ class VectorSearchNode(BaseNode):
                 label="Columns to Rerank",
                 required=False,
                 placeholder="content, source",
-                help_text="Order matters — the reranker processes columns left-to-right and only considers the first 2000 characters total. Put the most important column first.",
+                help_text="Must be string-type columns. Order matters — the reranker processes columns left-to-right and only considers the first 2000 characters total. Put the most important column first. If left blank, the reranker is skipped even when enabled.",
             ),
         ]
 
@@ -166,11 +166,12 @@ class VectorSearchNode(BaseNode):
         reranker = None
         if enable_reranker:
             rerank_cols_raw = config.get("columns_to_rerank", "")
-            rerank_cols = [c.strip() for c in rerank_cols_raw.split(",") if c.strip()] if rerank_cols_raw else columns
-            reranker = RerankerConfig(
-                model="databricks_reranker",
-                parameters=RerankerConfigRerankerParameters(columns_to_rerank=rerank_cols),
-            )
+            rerank_cols = [c.strip() for c in rerank_cols_raw.split(",") if c.strip()] if rerank_cols_raw else None
+            if rerank_cols:
+                reranker = RerankerConfig(
+                    model="databricks_reranker",
+                    parameters=RerankerConfigRerankerParameters(columns_to_rerank=rerank_cols),
+                )
         try:
             w = get_workspace_client()
             response = w.vector_search_indexes.query_index(

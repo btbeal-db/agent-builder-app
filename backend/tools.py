@@ -45,12 +45,13 @@ def _make_vector_search_tool(config: dict[str, Any]) -> BaseTool:
             rerank_cols = (
                 [c.strip() for c in rerank_cols_raw.split(",") if c.strip()]
                 if rerank_cols_raw
-                else columns
+                else None
             )
-            reranker = RerankerConfig(
-                model="databricks_reranker",
-                parameters=RerankerConfigRerankerParameters(columns_to_rerank=rerank_cols),
-            )
+            if rerank_cols:
+                reranker = RerankerConfig(
+                    model="databricks_reranker",
+                    parameters=RerankerConfigRerankerParameters(columns_to_rerank=rerank_cols),
+                )
 
         filters_json = None
         if filters and filters.strip():

@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { previewGraph, validateGraph } from "../api";
 import type { ChatMessage, GraphDef, StateFieldDef } from "../types";
+import SimpleMarkdown from "./SimpleMarkdown";
 
 interface Props {
   graphGetter: (() => GraphDef) | null;
@@ -219,8 +220,8 @@ export default function ChatPlayground({ graphGetter, stateFieldsRef, onClose }:
                           if (typeof parsed === "object" && parsed !== null) {
                             return <pre className="chat-json-output">{JSON.stringify(parsed, null, 2)}</pre>;
                           }
-                        } catch { /* not JSON, render as text */ }
-                        return msg.content;
+                        } catch { /* not JSON, render as markdown */ }
+                        return <SimpleMarkdown content={msg.content} />;
                       })()}
                     </div>
                   )}
