@@ -6,40 +6,43 @@ Visual drag-and-drop [LangGraph](https://langchain-ai.github.io/langgraph/) agen
 
 ## Prerequisites
 
-- Databricks workspace with Unity Catalog enabled
+- Databricks workspace with Unity Catalog enabled and [Apps user token passthrough](https://docs.databricks.com/aws/en/dev-tools/databricks-apps/) enabled
+
+## Deploy from Git (recommended)
+
+The easiest way to deploy is directly from this GitHub repository — no local clone or build tools needed.
+
+1. In your Databricks workspace, go to **Compute → Apps**
+2. Click **Create App** and give it a name
+3. Under **Git repository**, paste this repo's URL and select your Git provider
+4. For private repos, click **Configure Git credential** to add access
+5. Click **Create app**
+6. On the app details page, click **Deploy → From Git**
+7. Set the **Git reference** to `main` and **Reference type** to `Branch`
+8. Click **Deploy**
+
+For more details, see [Deploy from a Git repository](https://docs.databricks.com/aws/en/dev-tools/databricks-apps/deploy/#deploy-from-a-git-repository).
+
+## Local Development (optional)
+
+If you want to run locally or contribute changes:
+
+### Prerequisites
+
 - [Databricks CLI](https://docs.databricks.com/dev-tools/cli/install.html) v0.230+
 - Node.js 18+ and npm
 - Python 3.11 and [uv](https://docs.astral.sh/uv/)
 
-## Quick Start
-
-### 1. Clone and configure
+### Setup
 
 ```bash
 git clone <repo-url> && cd agent-builder-app
 databricks auth login --host https://your-workspace.cloud.databricks.com
-```
-
-### 2. Install dependencies
-
-```bash
 uv sync
 cd frontend && npm install && cd ..
 ```
 
-### 3. Deploy to Databricks
-
-```bash
-# First time — creates the app and provisions compute (~2-3 min)
-./deploy.sh --profile DEFAULT --init
-
-# Subsequent deploys — syncs code + redeploys (~30 sec)
-./deploy.sh --profile DEFAULT
-```
-
-Replace `DEFAULT` with the name of your Databricks CLI profile (run `databricks auth profiles` to list them).
-
-### 4. Local development (optional)
+### Run locally
 
 ```bash
 # Terminal 1: backend
@@ -50,6 +53,18 @@ cd frontend && npm run dev
 ```
 
 The frontend dev server proxies `/api` requests to the backend on port 8000.
+
+### Deploy via CLI
+
+```bash
+# First time — creates the app and provisions compute (~2-3 min)
+./deploy.sh --profile DEFAULT --init
+
+# Subsequent deploys — syncs code + redeploys (~30 sec)
+./deploy.sh --profile DEFAULT
+```
+
+Replace `DEFAULT` with the name of your Databricks CLI profile (run `databricks auth profiles` to list them).
 
 ## Architecture
 
@@ -97,7 +112,7 @@ See [CONTRIB.md](CONTRIB.md) for how to create and register new node types.
 
 | Issue | Fix |
 |---|---|
-| `requirements-serving.txt` not found during deploy | Run `uv pip compile pyproject.toml -o requirements-serving.txt --python-version 3.11` |
+| App deploy fails with "user token passthrough not enabled" | Ask your workspace admin to enable Apps user token passthrough |
+| `requirements-serving.txt` not found during CLI deploy | Run `uv pip compile pyproject.toml -o requirements-serving.txt --python-version 3.11` |
 | Stale deployment state / workspace mismatch | Run `./deploy.sh dev --clean` to clear Terraform state |
-| Auth errors | Run `databricks auth env` to verify credentials, then `databricks auth login` to refresh |
-| Frontend not loading after deploy | Ensure you ran `cd frontend && npm run build` (or use `deploy.sh` which does this automatically) |
+| Auth errors (CLI deploy) | Run `databricks auth env` to verify credentials, then `databricks auth login` to refresh |
