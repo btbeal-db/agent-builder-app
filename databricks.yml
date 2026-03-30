@@ -17,9 +17,13 @@ resources:
       description: "Visual drag-and-drop LangGraph agent builder for Databricks"
       source_code_path: .
       user_api_scopes:
-        - sql
+        - catalog.catalogs:read
+        - catalog.schemas:read
+        - catalog.tables:read
+        - genie
         - serving.serving-endpoints
         - serving.serving-endpoints-data-plane
+        - sql
         - vectorsearch.vector-search-endpoints
         - vectorsearch.vector-search-indexes
 
