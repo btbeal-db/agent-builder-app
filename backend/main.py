@@ -9,10 +9,6 @@ import tempfile
 import uuid
 from pathlib import Path
 
-from dotenv import load_dotenv
-
-load_dotenv()
-
 import mlflow
 from databricks.sdk.errors import ResourceAlreadyExists
 from databricks.sdk.service.serving import (

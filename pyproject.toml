@@ -11,7 +11,6 @@ dependencies = [
     "langchain-community>=0.3.0",
     "databricks-sdk>=0.20.0",
     "pydantic>=2.0.0",
-    "python-dotenv>=1.0.0",
     "mlflow[databricks]>=3.1.3",
     "databricks-agents>=1.1.0",
     "databricks-langchain[memory]>=0.12.0",
@@ -35,7 +34,3 @@ packages = ["backend"]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-[[tool.uv.index]]
-name = "databricks-proxy"
-url = "https://pypi-proxy.dev.databricks.com/simple/"
-default = true

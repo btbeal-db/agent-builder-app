@@ -26,10 +26,5 @@ resources:
 targets:
   dev:
     default: true
-    workspace:
-      host: https://adb-984752964297111.11.azuredatabricks.net/
-      profile: DEFAULT
-  prod:
-    workspace:
-      host: https://adb-984752964297111.11.azuredatabricks.net/
-      profile: DEFAULT
+    # Workspace is resolved from your Databricks CLI auth config.
+    # Run: databricks auth login --host https://your-workspace.cloud.databricks.com
