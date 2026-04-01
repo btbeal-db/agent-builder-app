@@ -31,5 +31,14 @@ def get_workspace_client() -> WorkspaceClient:
     token = _user_token.get()
     host = os.environ.get("DATABRICKS_HOST", "")
     if token and host:
-        return WorkspaceClient(host=host, token=token)
+        # Temporarily mask the SP's OAuth env vars so the SDK doesn't
+        # see two auth methods (OBO token + SP client credentials).
+        masked = {}
+        for key in ("DATABRICKS_CLIENT_ID", "DATABRICKS_CLIENT_SECRET"):
+            if key in os.environ:
+                masked[key] = os.environ.pop(key)
+        try:
+            return WorkspaceClient(host=host, token=token, auth_type="oauth")
+        finally:
+            os.environ.update(masked)
     return WorkspaceClient()
