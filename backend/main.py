@@ -47,6 +47,10 @@ from .schema import (
     PreviewResponse,
 )
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
 logger = logging.getLogger(__name__)
 
 _BACKEND_DIR = Path(__file__).parent

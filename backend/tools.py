@@ -68,13 +68,18 @@ def _make_vector_search_tool(config: dict[str, Any]) -> BaseTool:
         _token = get_user_token()
         _host = os.environ.get("DATABRICKS_HOST", "")
         if _token and _host:
-            logger.info("VS TOOL DEBUG: using OBO token directly (len=%d)", len(_token))
+            logger.info("VS TOOL DEBUG: using OBO token directly (len=%d, first8=%s)", len(_token), _token[:8])
             _masked = {}
             for _k in ("DATABRICKS_CLIENT_ID", "DATABRICKS_CLIENT_SECRET"):
                 if _k in os.environ:
                     _masked[_k] = os.environ.pop(_k)
             try:
                 w = WorkspaceClient(host=_host, token=_token)
+                try:
+                    me = w.current_user.me()
+                    logger.info("VS TOOL DEBUG: authenticated as %s (%s)", me.user_name, me.display_name)
+                except Exception as _e:
+                    logger.warning("VS TOOL DEBUG: could not verify identity: %s", _e)
             finally:
                 os.environ.update(_masked)
         else:
