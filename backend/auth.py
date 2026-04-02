@@ -27,18 +27,15 @@ def get_user_token() -> str | None:
 
 def get_workspace_client() -> WorkspaceClient:
     """Return a WorkspaceClient using the OBO user token if available,
-    otherwise fall back to the default env-var credentials (local dev)."""
+    otherwise fall back to the default env-var credentials (local dev).
+
+    When an OBO token is present we temporarily mask the service principal's
+    OAuth env vars so the SDK sees only one auth method (the user token).
+    Do NOT pass ``auth_type`` — letting the SDK auto-detect avoids conflicts
+    between legacy-scope PAT handling and OAuth M2M client-credential flows.
+    """
     token = _user_token.get()
     host = os.environ.get("DATABRICKS_HOST", "")
     if token and host:
-        # Temporarily mask the SP's OAuth env vars so the SDK doesn't
-        # see two auth methods (OBO token + SP client credentials).
-        masked = {}
-        for key in ("DATABRICKS_CLIENT_ID", "DATABRICKS_CLIENT_SECRET"):
-            if key in os.environ:
-                masked[key] = os.environ.pop(key)
-        try:
-            return WorkspaceClient(host=host, token=token, auth_type="oauth")
-        finally:
-            os.environ.update(masked)
+        return WorkspaceClient(host=host, token=token)
     return WorkspaceClient()
