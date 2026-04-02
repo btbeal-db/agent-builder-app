@@ -61,7 +61,26 @@ def _make_vector_search_tool(config: dict[str, Any]) -> BaseTool:
             except json.JSONDecodeError:
                 pass
 
-        w = get_workspace_client()
+        # DEBUG: inline client to match working node path
+        import os
+        from databricks.sdk import WorkspaceClient
+        from .auth import get_user_token
+        _token = get_user_token()
+        _host = os.environ.get("DATABRICKS_HOST", "")
+        if _token and _host:
+            logger.info("VS TOOL DEBUG: using OBO token directly (len=%d)", len(_token))
+            _masked = {}
+            for _k in ("DATABRICKS_CLIENT_ID", "DATABRICKS_CLIENT_SECRET"):
+                if _k in os.environ:
+                    _masked[_k] = os.environ.pop(_k)
+            try:
+                w = WorkspaceClient(host=_host, token=_token)
+            finally:
+                os.environ.update(_masked)
+        else:
+            logger.info("VS TOOL DEBUG: no OBO token, using default client")
+            w = get_workspace_client()
+
         response = w.vector_search_indexes.query_index(
             index_name=index_name,
             columns=columns,
