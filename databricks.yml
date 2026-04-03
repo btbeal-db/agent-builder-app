@@ -22,6 +22,7 @@ resources:
         - serving.serving-endpoints-data-plane
         - vectorsearch.vector-search-endpoints
         - vectorsearch.vector-search-indexes
+        - mlflow
 
 targets:
   dev:
