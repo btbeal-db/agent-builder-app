@@ -37,9 +37,12 @@ from .auth import set_user_token, get_workspace_client
 from .ai_chat import AIChatRequest, AIChatResponse, handle_ai_chat
 from .graph_builder import build_graph, filter_output, run_graph
 from .nodes import get_all_metadata
+from .notebook_gen import generate_deploy_notebook
 from .schema import (
     DeployEvent,
     DeployMode,
+    DeployNotebookRequest,
+    DeployNotebookResponse,
     DeployRequest,
     DeployStepStatus,
     GraphDef,
@@ -422,6 +425,41 @@ def load_graph_from_run(run_id: str):
     except Exception as e:
         logger.exception("Failed to load graph from run %s", run_id)
         return {"success": False, "error": str(e)}
+
+
+@app.post("/api/graph/deploy-notebook")
+def deploy_notebook(req: DeployNotebookRequest) -> DeployNotebookResponse:
+    """Generate a deployment notebook and upload it to the user's workspace."""
+    import base64
+    from databricks.sdk.service.workspace import ImportFormat, Language
+
+    try:
+        build_graph(req.graph)
+    except Exception as e:
+        return DeployNotebookResponse(success=False, error=f"Graph validation failed: {e}")
+
+    try:
+        notebook_content = generate_deploy_notebook(req)
+    except Exception as e:
+        logger.exception("Notebook generation failed")
+        return DeployNotebookResponse(success=False, error=f"Notebook generation failed: {e}")
+
+    try:
+        w = get_workspace_client()
+        w.workspace.import_(
+            path=req.notebook_path,
+            format=ImportFormat.SOURCE,
+            language=Language.PYTHON,
+            content=base64.b64encode(notebook_content.encode()).decode(),
+            overwrite=True,
+        )
+        host = w.config.host.rstrip("/")
+        # Build notebook URL (encode the path for the URL)
+        nb_url = f"{host}#notebook/{req.notebook_path.lstrip('/')}"
+        return DeployNotebookResponse(success=True, notebook_url=nb_url)
+    except Exception as e:
+        logger.exception("Failed to upload notebook")
+        return DeployNotebookResponse(success=False, error=f"Failed to upload notebook: {e}")
 
 
 @app.post("/api/graph/deploy")

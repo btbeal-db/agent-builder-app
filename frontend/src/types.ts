@@ -111,6 +111,20 @@ export interface DeployRequest {
   deploy_mode: DeployMode;
 }
 
+export interface DeployNotebookRequest {
+  graph: GraphDef;
+  model_name: string;
+  experiment_path: string;
+  lakebase_conn_string: string;
+  notebook_path: string;
+}
+
+export interface DeployNotebookResponse {
+  success: boolean;
+  notebook_url: string;
+  error: string | null;
+}
+
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant";

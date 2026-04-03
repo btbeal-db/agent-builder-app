@@ -116,3 +116,17 @@ class DeployResponse(BaseModel):
     endpoint_url: str = ""
     model_version: str = ""
     error: str | None = None
+
+
+class DeployNotebookRequest(BaseModel):
+    graph: GraphDef
+    model_name: str  # Unity Catalog path: catalog.schema.model_name
+    experiment_path: str  # MLflow experiment: /Users/email/experiment
+    lakebase_conn_string: str = ""
+    notebook_path: str  # Workspace path: /Users/email/deploy_my_agent
+
+
+class DeployNotebookResponse(BaseModel):
+    success: bool
+    notebook_url: str = ""
+    error: str | None = None

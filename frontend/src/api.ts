@@ -1,4 +1,4 @@
-import type { NodeTypeMetadata, GraphDef, PreviewResponse, DeployRequest, DeployEvent } from "./types";
+import type { NodeTypeMetadata, GraphDef, PreviewResponse, DeployRequest, DeployEvent, DeployNotebookRequest, DeployNotebookResponse } from "./types";
 
 const BASE = "/api";
 
@@ -99,4 +99,14 @@ export async function deployGraphStream(
       }
     }
   }
+}
+
+export async function deployNotebook(req: DeployNotebookRequest): Promise<DeployNotebookResponse> {
+  const res = await fetch(`${BASE}/graph/deploy-notebook`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+  if (!res.ok) throw new Error(`Deploy notebook request failed: ${res.status}`);
+  return res.json();
 }
