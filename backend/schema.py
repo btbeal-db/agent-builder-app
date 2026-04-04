@@ -121,3 +121,4 @@ class AppConfig(BaseModel):
     catalog: str = ""
     schema_name: str = ""
     experiment_base: str = "/Shared/agent-builder"
+    deploy_job_id: str = ""

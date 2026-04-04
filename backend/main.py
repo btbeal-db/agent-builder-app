@@ -11,30 +11,17 @@ from pathlib import Path
 
 import mlflow
 from databricks.sdk import WorkspaceClient
-from databricks.sdk.errors import ResourceAlreadyExists
-from databricks.sdk.service.serving import (
-    AiGatewayConfig,
-    AiGatewayInferenceTableConfig,
-    EndpointCoreConfigInput,
-    ServedEntityInput,
-)
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.errors import GraphInterrupt
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from mlflow.models.resources import (
-    DatabricksFunction,
-    DatabricksGenieSpace,
-    DatabricksServingEndpoint,
-    DatabricksTable,
-    DatabricksVectorSearchIndex,
-)
 
 from langchain_core.messages import BaseMessage
 
 from .auth import set_user_token, get_workspace_client
+from .deploy_helpers import extract_resources, collect_code_paths
 from .ai_chat import AIChatRequest, AIChatResponse, handle_ai_chat
 from .graph_builder import build_graph, filter_output, run_graph
 from .nodes import get_all_metadata
@@ -76,59 +63,8 @@ def _serialize_messages(messages: list) -> list[dict]:
     return result
 
 
-def _extract_resources(graph: GraphDef) -> list:
-    """Extract Databricks resource declarations from all nodes in the graph.
 
-    Maps node config fields to the appropriate MLflow resource types so that
-    Model Serving provisions credentials (OBO) for each external resource.
-    """
-    resources = []
-    seen = set()
-
-    # Config field name → resource class mapping
-    resource_map = {
-        "endpoint": DatabricksServingEndpoint,        # LLM serving endpoints
-        "endpoint_name": DatabricksServingEndpoint,   # VS endpoint names
-        "index_name": DatabricksVectorSearchIndex,    # VS indexes
-        "room_id": DatabricksGenieSpace,              # Genie rooms
-        "table_name": DatabricksTable,                # UC tables
-        "function_name": DatabricksFunction,          # UC functions
-    }
-
-    for node in graph.nodes:
-        for config_key, resource_cls in resource_map.items():
-            value = node.config.get(config_key)
-            if value and (config_key, value) not in seen:
-                seen.add((config_key, value))
-                init_param = {
-                    DatabricksServingEndpoint: "endpoint_name",
-                    DatabricksVectorSearchIndex: "index_name",
-                    DatabricksGenieSpace: "genie_space_id",
-                    DatabricksTable: "table_name",
-                    DatabricksFunction: "function_name",
-                }[resource_cls]
-                resources.append(resource_cls(**{init_param: value}))
-
-    return resources
-
-
-def _collect_code_paths() -> list[str]:
-    """Copy backend/ to a clean temp directory (no __pycache__, static, etc.) for MLflow code_paths.
-
-    MLflow code_paths needs a directory to preserve the package structure
-    so that `from backend.graph_builder import ...` works in the serving container.
-    """
-    import shutil
-
-    tmp = Path(tempfile.mkdtemp()) / "backend"
-    shutil.copytree(
-        _BACKEND_DIR,
-        tmp,
-        ignore=shutil.ignore_patterns(
-            "mlruns", "__pycache__", "static", "*.pyc", "*.db", "mlflow_model.py",
-        ),
-    )
-    return [str(tmp)]
+# _extract_resources and _collect_code_paths moved to deploy_helpers.py
 
 
 app = FastAPI(title="Agent Builder", version="0.1.0")
@@ -165,6 +101,7 @@ app.add_middleware(OBOMiddleware)
 _DEPLOY_CATALOG = os.environ.get("DEPLOY_CATALOG", "")
 _DEPLOY_SCHEMA = os.environ.get("DEPLOY_SCHEMA", "")
 _EXPERIMENT_BASE = os.environ.get("EXPERIMENT_BASE", "/Shared/agent-builder")
+_DEPLOY_JOB_ID = os.environ.get("DEPLOY_JOB_ID", "")
 
 
 def _get_app_config() -> AppConfig:
@@ -172,6 +109,7 @@ def _get_app_config() -> AppConfig:
         catalog=_DEPLOY_CATALOG,
         schema_name=_DEPLOY_SCHEMA,
         experiment_base=_EXPERIMENT_BASE,
+        deploy_job_id=_DEPLOY_JOB_ID,
     )
 
 
@@ -451,188 +389,89 @@ def load_graph_from_run(run_id: str):
 
 @app.post("/api/graph/deploy")
 def deploy_graph(req: DeployRequest):
-    """Log, register, and deploy the graph as a Model Serving endpoint.
+    """Validate the graph and submit a deploy Job.
 
-    All MLflow and registration operations use the app's service principal.
-    The catalog/schema and experiment path are configured via env vars
-    (DEPLOY_CATALOG, DEPLOY_SCHEMA, EXPERIMENT_BASE).
-
-    Streams SSE events so the frontend can show step-by-step progress.
+    Returns the Job run_id immediately.  The frontend polls
+    ``/api/graph/deploy/status`` for progress.
     """
     cfg = _get_app_config()
 
     if not cfg.catalog or not cfg.schema_name:
-        return StreamingResponse(
-            iter([
-                f"data: {DeployEvent(step='validate', status=DeployStepStatus.ERROR, message='App not configured: DEPLOY_CATALOG and DEPLOY_SCHEMA env vars are required. Ask the app admin to set them.').model_dump_json()}\n\n"
-            ]),
-            media_type="text/event-stream",
+        raise HTTPException(400, "App not configured: set DEPLOY_CATALOG and DEPLOY_SCHEMA env vars.")
+    if not cfg.deploy_job_id:
+        raise HTTPException(400, "App not configured: set DEPLOY_JOB_ID env var.")
+
+    # Validate
+    try:
+        build_graph(req.graph)
+    except Exception as e:
+        raise HTTPException(400, f"Graph validation failed: {e}")
+
+    # Submit the deploy Job
+    try:
+        w = WorkspaceClient()
+        app_info = w.apps.get(os.environ.get("DATABRICKS_APP_NAME", ""))
+        source_path = (
+            app_info.active_deployment.deployment_artifacts.source_code_path
+            if app_info and app_info.active_deployment
+            else ""
         )
 
-    # Build fully-qualified names from user's model name + configured catalog/schema
+        params_json = json.dumps({
+            "graph_json": req.graph.model_dump_json(),
+            "model_name": req.model_name,
+            "catalog": cfg.catalog,
+            "schema_name": cfg.schema_name,
+            "experiment_base": cfg.experiment_base,
+            "lakebase_conn_string": req.lakebase_conn_string,
+            "bundle_path": source_path,
+        })
+        run_response = w.jobs.run_now(
+            job_id=int(cfg.deploy_job_id),
+            notebook_params={"params_json": params_json},
+        )
+    except Exception as e:
+        raise HTTPException(500, f"Failed to submit deploy job: {e}")
+
     fq_model_name = f"{cfg.catalog}.{cfg.schema_name}.{req.model_name}"
-    experiment_path = f"{cfg.experiment_base}/{req.model_name}"
     endpoint_name = req.model_name.replace("_", "-")
 
-    def _emit(step: str, status: DeployStepStatus, message: str,
-              data: dict[str, str] | None = None) -> str:
-        event = DeployEvent(step=step, status=status, message=message, data=data)
-        return f"data: {event.model_dump_json()}\n\n"
+    return {
+        "run_id": run_response.run_id,
+        "model_name": fq_model_name,
+        "endpoint_name": endpoint_name,
+    }
 
-    def _generate():
-        result_data: dict[str, str] = {}
 
-        # ── Step 1: Validate ──────────────────────────────────────────
-        yield _emit("validate", DeployStepStatus.RUNNING, "Compiling graph...")
+@app.get("/api/graph/deploy/status")
+def deploy_status(run_id: int):
+    """Poll the status of a deploy Job run."""
+    try:
+        w = WorkspaceClient()
+        run_state = w.jobs.get_run(run_id=run_id)
+    except Exception as e:
+        raise HTTPException(500, f"Failed to check job status: {e}")
+
+    lifecycle = run_state.state.life_cycle_state.value if run_state.state.life_cycle_state else ""
+    terminal_states = {"TERMINATED", "SKIPPED", "INTERNAL_ERROR"}
+
+    if lifecycle not in terminal_states:
+        return {"status": "running", "lifecycle": lifecycle}
+
+    result_state = run_state.state.result_state
+    if result_state and result_state.value == "SUCCESS":
+        # Read notebook output
         try:
-            build_graph(req.graph)
-        except Exception as e:
-            yield _emit("validate", DeployStepStatus.ERROR, f"Graph validation failed: {e}")
-            return
-        yield _emit("validate", DeployStepStatus.DONE, "Graph compiled successfully")
-
-        # ── Step 2: Log model to MLflow ───────────────────────────────
-        yield _emit("log_model", DeployStepStatus.RUNNING,
-                     f"Logging model to {experiment_path}...")
-        model_info = None
-        try:
-            mlflow.set_tracking_uri("databricks")
-            mlflow.set_registry_uri("databricks-uc")
-            experiment = mlflow.set_experiment(experiment_path)
-            result_data["experiment_id"] = experiment.experiment_id
-
-            with tempfile.NamedTemporaryFile(
-                mode="w", suffix=".json", delete=False
-            ) as f:
-                f.write(req.graph.model_dump_json())
-                graph_def_path = f.name
-
-            resources = _extract_resources(req.graph)
-
-            requirements_path = _BACKEND_DIR.parent / "requirements-serving.txt"
-            if not requirements_path.exists():
-                raise FileNotFoundError(
-                    "requirements-serving.txt not found. Run: "
-                    "uv pip compile pyproject.toml -o requirements-serving.txt "
-                    "--python-version 3.11"
-                )
-
-            run = mlflow.start_run()
-            try:
-                model_info = mlflow.pyfunc.log_model(
-                    artifact_path="agent",
-                    python_model=str(_BACKEND_DIR / "mlflow_model.py"),
-                    artifacts={"graph_def": graph_def_path},
-                    code_paths=_collect_code_paths(),
-                    pip_requirements=str(requirements_path),
-                    resources=resources if resources else None,
-                )
-            except Exception:
-                mlflow.end_run()
-                raise
-
-            result_data["run_id"] = run.info.run_id
-        except Exception as e:
-            yield _emit("log_model", DeployStepStatus.ERROR,
-                        f"Model logging failed: {e}")
-            return
-        yield _emit("log_model", DeployStepStatus.DONE,
-                     f"Model logged (run: {run.info.run_id})")
-
-        # ── Step 3: Register model in Unity Catalog ───────────────────
-        yield _emit("register_model", DeployStepStatus.RUNNING,
-                     f"Registering {fq_model_name}...")
-        try:
-            mv = mlflow.register_model(
-                model_uri=model_info.model_uri,
-                name=fq_model_name,
-            )
-            result_data["model_version"] = str(mv.version)
-        except Exception as e:
-            mlflow.end_run()
-            yield _emit("register_model", DeployStepStatus.ERROR,
-                        f"Registration failed: {e}")
-            return
-        mlflow.end_run()
-        yield _emit("register_model", DeployStepStatus.DONE,
-                     f"Registered as {fq_model_name} v{mv.version}")
-
-        # ── Step 4: Create / update serving endpoint ──────────────────
-        yield _emit("create_endpoint", DeployStepStatus.RUNNING,
-                     "Creating serving endpoint...")
-        try:
-            env_vars = {
-                "ENABLE_MLFLOW_TRACING": "true",
-                "MLFLOW_EXPERIMENT_ID": result_data.get("experiment_id", ""),
-            }
-            if req.lakebase_conn_string:
-                env_vars["LAKEBASE_CONN_STRING"] = req.lakebase_conn_string
-
-            served_entity = ServedEntityInput(
-                entity_name=fq_model_name,
-                entity_version=result_data["model_version"],
-                environment_vars=env_vars if env_vars else None,
-                scale_to_zero_enabled=True,
-                workload_size="Small",
-            )
-
-            ai_gateway = AiGatewayConfig(
-                inference_table_config=AiGatewayInferenceTableConfig(
-                    catalog_name=cfg.catalog,
-                    schema_name=cfg.schema_name,
-                    table_name_prefix=endpoint_name,
-                    enabled=True,
-                ),
-            )
-
-            w = WorkspaceClient()  # SP credentials
-            try:
-                w.serving_endpoints.create(
-                    name=endpoint_name,
-                    config=EndpointCoreConfigInput(
-                        name=endpoint_name,
-                        served_entities=[served_entity],
-                    ),
-                    ai_gateway=ai_gateway,
-                )
-            except ResourceAlreadyExists:
-                w.serving_endpoints.update_config(
-                    name=endpoint_name,
-                    served_entities=[served_entity],
-                )
-                w.serving_endpoints.put_ai_gateway(
-                    name=endpoint_name,
-                    inference_table_config=AiGatewayInferenceTableConfig(
-                        catalog_name=cfg.catalog,
-                        schema_name=cfg.schema_name,
-                        table_name_prefix=endpoint_name,
-                        enabled=True,
-                    ),
-                )
-
-            host = w.config.host.rstrip("/")
-            result_data["endpoint_url"] = (
-                f"{host}/serving-endpoints/{endpoint_name}/invocations"
-            )
-        except Exception as e:
-            yield _emit("create_endpoint", DeployStepStatus.ERROR,
-                        f"Endpoint creation failed: {e}")
-            return
-        yield _emit("create_endpoint", DeployStepStatus.DONE,
-                     f"Endpoint ready: {endpoint_name}")
-
-        # ── Done ──────────────────────────────────────────────────────
-        yield _emit("complete", DeployStepStatus.DONE,
-                     "Deployment complete!", result_data)
-
-    return StreamingResponse(
-        _generate(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-        },
-    )
+            output = w.jobs.get_run_output(run_id=run_id)
+            result = json.loads(output.notebook_output.result)
+        except Exception:
+            result = {}
+        return {"status": "success", **result}
+    else:
+        return {
+            "status": "failed",
+            "error": run_state.state.state_message or "Job failed",
+        }
 
 
 # ── Serve frontend build ──────────────────────────────────────────────────────

@@ -1,6 +1,7 @@
-import { useState, useCallback, useEffect } from "react";
-import { fetchAppConfig, deployGraphStream } from "../api";
-import type { GraphDef, StateFieldDef, AppConfig, DeployStepName, DeployStepStatus, DeployEvent } from "../types";
+import { useState, useCallback, useEffect, useRef } from "react";
+import { fetchAppConfig, submitDeploy, pollDeployStatus } from "../api";
+import type { DeployStatusResponse } from "../api";
+import type { GraphDef, StateFieldDef, AppConfig } from "../types";
 
 interface Props {
   graphGetter: (() => GraphDef) | null;
@@ -10,19 +11,10 @@ interface Props {
 
 type Phase = "loading" | "form" | "deploying" | "done" | "error";
 
-interface StepState {
-  status: DeployStepStatus;
-  message: string;
-}
-
-const STEP_NAMES: DeployStepName[] = ["validate", "log_model", "register_model", "create_endpoint"];
-
-const STEP_LABELS: Record<string, string> = {
-  validate: "Validate Graph",
-  log_model: "Log Model to MLflow",
-  register_model: "Register in Unity Catalog",
-  create_endpoint: "Create Serving Endpoint",
-};
+const DEPLOY_STEPS = [
+  { key: "submit", label: "Submit Deploy Job" },
+  { key: "job", label: "Log, Register & Create Endpoint" },
+];
 
 function preflight(graphGetter: (() => GraphDef) | null, stateFields: StateFieldDef[]): string | null {
   if (!graphGetter) return "The graph hasn't loaded yet.";
@@ -52,7 +44,6 @@ function preflight(graphGetter: (() => GraphDef) | null, stateFields: StateField
   return null;
 }
 
-/** Check if any LLM node has conversational mode enabled. */
 function hasConversationalNode(graphGetter: (() => GraphDef) | null): boolean {
   if (!graphGetter) return false;
   try {
@@ -67,32 +58,29 @@ function hasConversationalNode(graphGetter: (() => GraphDef) | null): boolean {
   }
 }
 
-function StepIcon({ status }: { status: DeployStepStatus }) {
-  switch (status) {
-    case "running":
-      return <span className="deploy-spinner-sm" />;
-    case "done":
-      return <span className="deploy-step-check">&#10003;</span>;
-    case "error":
-      return <span className="deploy-step-cross">&#10007;</span>;
-    case "skipped":
-      return <span className="deploy-step-dash">&mdash;</span>;
-    default:
-      return <span className="deploy-step-pending">&#9675;</span>;
-  }
-}
-
 export default function DeployModal({ graphGetter, stateFieldsRef, onClose }: Props) {
   const [modelName, setModelName] = useState("");
   const [lakebaseConnString, setLakebaseConnString] = useState("");
   const [phase, setPhase] = useState<Phase>("loading");
   const [config, setConfig] = useState<AppConfig | null>(null);
-  const [steps, setSteps] = useState<Record<string, StepState>>({});
-  const [resultData, setResultData] = useState<DeployEvent["data"]>({});
+  const [stepStatus, setStepStatus] = useState<Record<string, "pending" | "running" | "done" | "error">>({
+    submit: "pending",
+    job: "pending",
+  });
+  const [resultData, setResultData] = useState<DeployStatusResponse | null>(null);
   const [errorMsg, setErrorMsg] = useState("");
+  const [endpointName, setEndpointName] = useState("");
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const isConversational = hasConversationalNode(graphGetter);
   const needsLakebase = isConversational && !lakebaseConnString.trim();
+
+  // Clean up polling on unmount
+  useEffect(() => {
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, []);
 
   // Fetch app config on mount
   useEffect(() => {
@@ -119,56 +107,63 @@ export default function DeployModal({ graphGetter, stateFieldsRef, onClose }: Pr
     const graph = graphGetter!();
     graph.state_fields = stateFields;
 
-    const initial: Record<string, StepState> = {};
-    for (const name of STEP_NAMES) {
-      initial[name] = { status: "pending", message: "" };
-    }
-    setSteps(initial);
+    setStepStatus({ submit: "running", job: "pending" });
     setPhase("deploying");
     setErrorMsg("");
-
-    let receivedTerminal = false;
+    setEndpointName(modelName.replace(/_/g, "-"));
 
     try {
-      await deployGraphStream(
-        {
-          graph,
-          model_name: modelName,
-          lakebase_conn_string: lakebaseConnString,
-        },
-        (event: DeployEvent) => {
-          if (event.step === "complete") {
-            receivedTerminal = true;
-            setResultData(event.data ?? {});
+      // Step 1: Submit
+      const resp = await submitDeploy({
+        graph,
+        model_name: modelName,
+        lakebase_conn_string: lakebaseConnString,
+      });
+
+      setStepStatus({ submit: "done", job: "running" });
+
+      // Step 2: Poll for completion
+      const runId = resp.run_id;
+      pollRef.current = setInterval(async () => {
+        try {
+          const status = await pollDeployStatus(runId);
+          if (status.status === "success") {
+            if (pollRef.current) clearInterval(pollRef.current);
+            setStepStatus({ submit: "done", job: "done" });
+            setResultData(status);
             setPhase("done");
-            return;
-          }
-          setSteps((prev) => ({
-            ...prev,
-            [event.step]: {
-              status: event.status as DeployStepStatus,
-              message: event.message,
-            },
-          }));
-          if (event.status === "error") {
-            receivedTerminal = true;
-            setErrorMsg(event.message);
+          } else if (status.status === "failed") {
+            if (pollRef.current) clearInterval(pollRef.current);
+            setStepStatus({ submit: "done", job: "error" });
+            setErrorMsg(status.error || "Deploy job failed");
             setPhase("error");
           }
-        },
-      );
-
-      if (!receivedTerminal) {
-        setErrorMsg("Connection to server closed unexpectedly.");
-        setPhase("error");
-      }
+          // status === "running" → keep polling
+        } catch {
+          // Transient network error during poll — keep trying
+        }
+      }, 5000);
     } catch (e: unknown) {
-      setErrorMsg(e instanceof Error ? e.message : "Connection error");
+      setStepStatus({ submit: "error", job: "pending" });
+      setErrorMsg(e instanceof Error ? e.message : "Failed to submit deploy job");
       setPhase("error");
     }
   }, [graphGetter, stateFieldsRef, modelName, lakebaseConnString]);
 
-  const configured = config && config.catalog && config.schema_name;
+  const configured = config && config.catalog && config.schema_name && config.deploy_job_id;
+
+  function StepIcon({ status }: { status: string }) {
+    switch (status) {
+      case "running":
+        return <span className="deploy-spinner-sm" />;
+      case "done":
+        return <span className="deploy-step-check">&#10003;</span>;
+      case "error":
+        return <span className="deploy-step-cross">&#10007;</span>;
+      default:
+        return <span className="deploy-step-pending">&#9675;</span>;
+    }
+  }
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -196,7 +191,7 @@ export default function DeployModal({ graphGetter, stateFieldsRef, onClose }: Pr
             {!configured && (
               <div className="deploy-error" style={{ marginBottom: "1rem" }}>
                 <p>App not configured for deployment</p>
-                <pre>The app admin needs to set DEPLOY_CATALOG and DEPLOY_SCHEMA environment variables.</pre>
+                <pre>The app admin needs to set DEPLOY_CATALOG, DEPLOY_SCHEMA, and DEPLOY_JOB_ID environment variables.</pre>
               </div>
             )}
 
@@ -263,48 +258,41 @@ export default function DeployModal({ graphGetter, stateFieldsRef, onClose }: Pr
         {phase === "deploying" && (
           <div className="modal-body">
             <div className="deploy-stepper">
-              {STEP_NAMES.map((name) => {
-                const s = steps[name];
-                if (!s) return null;
-                return (
-                  <div key={name} className={`deploy-step deploy-step--${s.status}`}>
-                    <span className="deploy-step-icon">
-                      <StepIcon status={s.status} />
-                    </span>
-                    <div className="deploy-step-text">
-                      <span className="deploy-step-label">{STEP_LABELS[name]}</span>
-                      {s.message && <span className="deploy-step-msg">{s.message}</span>}
-                    </div>
+              {DEPLOY_STEPS.map(({ key, label }) => (
+                <div key={key} className={`deploy-step deploy-step--${stepStatus[key]}`}>
+                  <span className="deploy-step-icon">
+                    <StepIcon status={stepStatus[key]} />
+                  </span>
+                  <div className="deploy-step-text">
+                    <span className="deploy-step-label">{label}</span>
+                    {key === "job" && stepStatus[key] === "running" && (
+                      <span className="deploy-step-msg">This may take a few minutes...</span>
+                    )}
                   </div>
-                );
-              })}
+                </div>
+              ))}
             </div>
           </div>
         )}
 
-        {phase === "done" && (
+        {phase === "done" && resultData && (
           <div className="modal-body">
             <div className="deploy-stepper">
-              {STEP_NAMES.map((name) => {
-                const s = steps[name];
-                if (!s) return null;
-                return (
-                  <div key={name} className={`deploy-step deploy-step--${s.status}`}>
-                    <span className="deploy-step-icon">
-                      <StepIcon status={s.status} />
-                    </span>
-                    <div className="deploy-step-text">
-                      <span className="deploy-step-label">{STEP_LABELS[name]}</span>
-                      {s.message && <span className="deploy-step-msg">{s.message}</span>}
-                    </div>
+              {DEPLOY_STEPS.map(({ key, label }) => (
+                <div key={key} className={`deploy-step deploy-step--done`}>
+                  <span className="deploy-step-icon">
+                    <span className="deploy-step-check">&#10003;</span>
+                  </span>
+                  <div className="deploy-step-text">
+                    <span className="deploy-step-label">{label}</span>
                   </div>
-                );
-              })}
+                </div>
+              ))}
             </div>
 
             <div className="deploy-success">
               <p>Agent deployed successfully!</p>
-              {resultData?.endpoint_url && (
+              {resultData.endpoint_url && (
                 <label className="deploy-label">
                   Endpoint URL
                   <input
@@ -316,15 +304,18 @@ export default function DeployModal({ graphGetter, stateFieldsRef, onClose }: Pr
                   />
                 </label>
               )}
-              {resultData?.model_version && (
+              {resultData.model_version && (
                 <p className="deploy-meta">Model version: {resultData.model_version}</p>
               )}
-              {resultData?.run_id && (
+              {resultData.run_id && (
                 <p className="deploy-meta">MLflow run: {resultData.run_id}</p>
               )}
+              <p className="deploy-hint" style={{ marginTop: "0.5rem" }}>
+                Note: The serving endpoint may take a few additional minutes to become ready.
+              </p>
             </div>
             <div className="deploy-actions">
-              {resultData?.endpoint_url && (
+              {resultData.endpoint_url && (
                 <button
                   className="btn btn-secondary"
                   onClick={() => navigator.clipboard.writeText(resultData.endpoint_url!)}
@@ -339,32 +330,28 @@ export default function DeployModal({ graphGetter, stateFieldsRef, onClose }: Pr
 
         {phase === "error" && (
           <div className="modal-body">
-            {Object.keys(steps).length > 0 && (
-              <div className="deploy-stepper">
-                {STEP_NAMES.map((name) => {
-                  const s = steps[name];
-                  if (!s) return null;
-                  return (
-                    <div key={name} className={`deploy-step deploy-step--${s.status}`}>
-                      <span className="deploy-step-icon">
-                        <StepIcon status={s.status} />
-                      </span>
-                      <div className="deploy-step-text">
-                        <span className="deploy-step-label">{STEP_LABELS[name]}</span>
-                        {s.message && <span className="deploy-step-msg">{s.message}</span>}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+            <div className="deploy-stepper">
+              {DEPLOY_STEPS.map(({ key, label }) => (
+                <div key={key} className={`deploy-step deploy-step--${stepStatus[key]}`}>
+                  <span className="deploy-step-icon">
+                    <StepIcon status={stepStatus[key]} />
+                  </span>
+                  <div className="deploy-step-text">
+                    <span className="deploy-step-label">{label}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
 
             <div className="deploy-error">
               <p>Deployment failed</p>
               <pre>{errorMsg}</pre>
             </div>
             <div className="deploy-actions">
-              <button className="btn btn-secondary" onClick={() => setPhase("form")}>Back</button>
+              <button className="btn btn-secondary" onClick={() => {
+                setPhase("form");
+                setStepStatus({ submit: "pending", job: "pending" });
+              }}>Back</button>
               <button className="btn btn-primary" onClick={onClose}>Close</button>
             </div>
           </div>

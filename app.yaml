@@ -4,12 +4,16 @@ command:
   - --host
   - 0.0.0.0
   - --port
-  - 8000
+  - "8000"
 # DATABRICKS_HOST, DATABRICKS_CLIENT_ID, DATABRICKS_CLIENT_SECRET, and
 # DATABRICKS_WORKSPACE_ID are automatically injected by the platform.
 # The user's OBO token arrives in the x-forwarded-access-token request header.
-#
-# Add any additional env vars below:
-# env:
-#   - name: LAKEBASE_TRACE_CONN_STRING
-#     value: "postgresql://..."
+env:
+  - name: DEPLOY_JOB_ID
+    value: "1046790565000568"
+  - name: DEPLOY_CATALOG
+    value: "agentbuilder_serverless_stable_catalog"
+  - name: DEPLOY_SCHEMA
+    value: "agent_builder"
+  # - name: LAKEBASE_TRACE_CONN_STRING
+  #   value: "postgresql://..."

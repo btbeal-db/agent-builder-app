@@ -2,7 +2,7 @@
 name = "agent-builder-app"
 version = "0.1.0"
 description = "Visual drag-and-drop LangGraph agent builder for Databricks"
-requires-python = ">=3.11,<3.12"
+requires-python = ">=3.10,<3.12"
 dependencies = [
     "fastapi>=0.104.0",
     "uvicorn>=0.24.0",

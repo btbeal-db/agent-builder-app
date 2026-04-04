@@ -111,6 +111,7 @@ export interface AppConfig {
   catalog: string;
   schema_name: string;
   experiment_base: string;
+  deploy_job_id: string;
 }
 
 export interface ChatMessage {

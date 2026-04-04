@@ -8,10 +8,9 @@ set -euo pipefail
 #   ./deploy.sh dev --profile MY_PROFILE       # specify target + profile
 #   ./deploy.sh dev --clean                    # clear stale state
 #
-# Normal flow (after first init):
-#   1. Builds frontend → backend/static/
-#   2. bundle deploy   → syncs files to workspace + updates app config
-#   3. apps deploy     → tells the running app to pick up new code (no compute restart)
+# Before first deploy:
+#   1. Set DEPLOY_CATALOG and DEPLOY_SCHEMA in app.yaml
+#   2. Run: ./deploy.sh --profile MY_PROFILE --init
 
 # ── Prerequisites ────────────────────────────────────────────────────────────
 command -v databricks >/dev/null 2>&1 || { echo "ERROR: 'databricks' CLI not found. See: https://docs.databricks.com/dev-tools/cli/install.html"; exit 1; }
@@ -28,70 +27,136 @@ if [[ "${1:-}" == --* ]]; then
   TARGET="dev"
 fi
 
-for arg in "$@"; do
-  case "$arg" in
+args=("$@")
+for i in "${!args[@]}"; do
+  case "${args[$i]}" in
     --clean) CLEAN=true ;;
     --init)  INIT=true ;;
-    --profile=*) PROFILE="${arg#--profile=}" ;;
+    --profile=*) PROFILE="${args[$i]#--profile=}" ;;
+    --profile)   [[ $((i+1)) -lt ${#args[@]} ]] && PROFILE="${args[$((i+1))]}" ;;
   esac
 done
 
-# Handle --profile VALUE (space-separated) form
-args=("$@")
-for i in "${!args[@]}"; do
-  if [[ "${args[$i]}" == "--profile" ]] && [[ $((i+1)) -lt ${#args[@]} ]]; then
-    PROFILE="${args[$((i+1))]}"
-  fi
-done
-
-# Set the profile for all databricks CLI commands in this script
 if [[ -n "$PROFILE" ]]; then
   export DATABRICKS_CONFIG_PROFILE="$PROFILE"
   echo "── Using Databricks CLI profile: $PROFILE"
 elif [[ -z "${DATABRICKS_CONFIG_PROFILE:-}" ]]; then
   echo "ERROR: No profile specified. Use --profile <name> or set DATABRICKS_CONFIG_PROFILE."
-  echo "  Example: ./deploy.sh --profile DEFAULT --init"
-  echo "  Run 'databricks auth profiles' to see available profiles."
   exit 1
 fi
 
 APP_NAME="agent-builder-${TARGET}"
 echo "── Target: $TARGET  App: $APP_NAME"
 
-# 1. Build frontend
+# ── 1. Build frontend ───────────────────────────────────────────────────────
 echo "── Building frontend..."
 (cd frontend && [[ -d node_modules ]] || npm install && npm run build)
 
-# 1b. Ensure requirements-serving.txt exists
+# ── 1b. Ensure requirements-serving.txt exists ───────────────────────────────
 if [[ ! -f requirements-serving.txt ]]; then
   echo "── Generating requirements-serving.txt..."
   uv pip compile pyproject.toml -o requirements-serving.txt --python-version 3.11
 fi
 
-# 2. Optionally clear stale Terraform state (needed when switching workspaces)
+# ── 2. Optionally clear stale Terraform state ────────────────────────────────
 STATE_FILE=".databricks/bundle/$TARGET/terraform/terraform.tfstate"
 if [[ "$CLEAN" == true ]] && [[ -f "$STATE_FILE" ]]; then
   echo "── Clearing stale deployment state..."
   rm "$STATE_FILE"
 fi
 
-# 3. Sync files + update app config (scopes, env vars, etc.)
-echo "── Syncing bundle..."
+# ── 3. Upload deploy notebook ────────────────────────────────────────────────
+NOTEBOOK_PATH="/Shared/agent-builder/deploy_notebook"
+echo "── Uploading deploy notebook to ${NOTEBOOK_PATH}..."
+databricks workspace mkdirs /Shared/agent-builder 2>/dev/null || true
+databricks workspace import "${NOTEBOOK_PATH}" \
+  --file backend/deploy_notebook.py \
+  --language PYTHON \
+  --format SOURCE \
+  --overwrite 2>/dev/null || echo "  (notebook upload failed — will retry after bundle deploy)"
+
+# ── 4. Deploy bundle (creates Job + App + wires resources) ───────────────────
+echo "── Deploying bundle..."
 databricks bundle deploy -t "$TARGET"
 
-# 4. Trigger app redeployment
+# ── 5. Set user API scopes (SDK doesn't propagate these from databricks.yml) ─
+echo "── Setting user API scopes..."
+databricks api patch /api/2.0/apps/"$APP_NAME" --json '{
+  "user_api_scopes": [
+    "catalog.catalogs:read",
+    "catalog.schemas:read",
+    "catalog.tables:read",
+    "dashboards.genie",
+    "serving.serving-endpoints",
+    "serving.serving-endpoints-data-plane",
+    "sql",
+    "vectorsearch.vector-search-endpoints",
+    "vectorsearch.vector-search-indexes"
+  ]
+}' > /dev/null 2>&1 || echo "  (could not set scopes — app may not exist yet)"
+
+# ── 6. Grant app's SP access to catalog/schema (first-time only) ─────────────
+if [[ "$INIT" == true ]]; then
+  # Read catalog/schema from app.yaml
+  CATALOG=$(python3 -c "
+import yaml
+with open('app.yaml') as f:
+    d = yaml.safe_load(f)
+for e in d.get('env', []):
+    if e['name'] == 'DEPLOY_CATALOG':
+        print(e['value'])
+        break
+" 2>/dev/null || echo "")
+  SCHEMA=$(python3 -c "
+import yaml
+with open('app.yaml') as f:
+    d = yaml.safe_load(f)
+for e in d.get('env', []):
+    if e['name'] == 'DEPLOY_SCHEMA':
+        print(e['value'])
+        break
+" 2>/dev/null || echo "")
+
+  if [[ -n "$CATALOG" ]] && [[ "$CATALOG" != "CHANGE_ME" ]] && [[ -n "$SCHEMA" ]] && [[ "$SCHEMA" != "CHANGE_ME" ]]; then
+    # Use the SP client_id for grants (SP names with spaces don't work with the CLI)
+    APP_SP_CLIENT_ID=$(databricks apps get "$APP_NAME" 2>/dev/null | python3 -c "
+import sys, json
+print(json.load(sys.stdin).get('service_principal_client_id', ''))
+" 2>/dev/null || echo "")
+
+    if [[ -n "$APP_SP_CLIENT_ID" ]]; then
+      echo "── Granting app SP access to ${CATALOG}.${SCHEMA}..."
+      databricks api patch "/api/2.0/unity-catalog/permissions/catalog/${CATALOG}" --json "{
+        \"changes\": [{
+          \"principal\": \"${APP_SP_CLIENT_ID}\",
+          \"add\": [\"USE_CATALOG\"]
+        }]
+      }" > /dev/null 2>&1 || echo "  (could not grant USE_CATALOG)"
+
+      databricks api patch "/api/2.0/unity-catalog/permissions/schema/${CATALOG}.${SCHEMA}" --json "{
+        \"changes\": [{
+          \"principal\": \"${APP_SP_CLIENT_ID}\",
+          \"add\": [\"USE_SCHEMA\", \"CREATE_MODEL\"]
+        }]
+      }" > /dev/null 2>&1 || echo "  (could not grant USE_SCHEMA/CREATE_MODEL)"
+    fi
+  else
+    echo "  WARNING: DEPLOY_CATALOG/DEPLOY_SCHEMA not set in app.yaml. Update them and redeploy."
+  fi
+fi
+
+# ── 7. Trigger app deployment ────────────────────────────────────────────────
 BUNDLE_PATH=$(databricks bundle summary -t "$TARGET" 2>&1 | grep "Path:" | awk '{print $2}')
 SOURCE_PATH="${BUNDLE_PATH}/files"
 
 if [[ "$INIT" == true ]]; then
-  # First time only: creates the app resource and provisions compute
   echo "── Initializing app (first-time setup)..."
   databricks bundle run agent_builder -t "$TARGET"
 else
-  # Redeploy: tells the running app to pick up new code — no compute restart
   echo "── Redeploying app..."
   databricks apps deploy "$APP_NAME" --source-code-path "$SOURCE_PATH"
 fi
 
+echo ""
 echo "── Done!"
-echo "── App URL: $(databricks apps get "$APP_NAME" 2>/dev/null | grep -oP 'https://[^\s"]+' | head -1 || echo '(check your workspace)')"
+echo "── App URL: $(databricks apps get "$APP_NAME" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('url','(check your workspace)'))" 2>/dev/null || echo '(check your workspace)')"

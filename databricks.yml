@@ -11,15 +11,38 @@ bundle:
   name: agent-builder-app
 
 resources:
+  jobs:
+    deploy_job:
+      name: agent-builder-deploy-${bundle.target}
+      tasks:
+        - task_key: deploy
+          notebook_task:
+            notebook_path: /Shared/agent-builder/deploy_notebook
+          environment_key: default
+      environments:
+        - environment_key: default
+          spec:
+            client: "1"
+      max_concurrent_runs: 5
+
   apps:
     agent_builder:
       name: agent-builder-${bundle.target}
       description: "Visual drag-and-drop LangGraph agent builder for Databricks"
       source_code_path: .
+      resources:
+        - name: deploy-job
+          job:
+            id: ${resources.jobs.deploy_job.id}
+            permission: CAN_MANAGE_RUN
       user_api_scopes:
-        - sql
+        - catalog.catalogs:read
+        - catalog.schemas:read
+        - catalog.tables:read
+        - dashboards.genie
         - serving.serving-endpoints
         - serving.serving-endpoints-data-plane
+        - sql
         - vectorsearch.vector-search-endpoints
         - vectorsearch.vector-search-indexes
 
