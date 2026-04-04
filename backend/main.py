@@ -409,13 +409,27 @@ def deploy_graph(req: DeployRequest):
 
     # Submit the deploy Job
     try:
-        w = WorkspaceClient()
-        app_info = w.apps.get(os.environ.get("DATABRICKS_APP_NAME", ""))
-        source_path = (
-            app_info.active_deployment.deployment_artifacts.source_code_path
-            if app_info and app_info.active_deployment
-            else ""
-        )
+        w = WorkspaceClient()  # SP credentials for Job submission
+
+        # Identify the deploying user via the OBO token
+        deployed_by = ""
+        try:
+            user_client = get_workspace_client()  # OBO client
+            me = user_client.current_user.me()
+            deployed_by = me.user_name or ""
+        except Exception:
+            pass
+
+        # Resolve the git ref the app is running from so the Job
+        # installs the same version of the package.
+        git_ref = "main"
+        try:
+            app_info = w.apps.get(os.environ.get("DATABRICKS_APP_NAME", ""))
+            git_source = app_info.active_deployment.git_source
+            if git_source:
+                git_ref = git_source.branch or git_source.tag or git_ref
+        except Exception:
+            pass
 
         params_json = json.dumps({
             "graph_json": req.graph.model_dump_json(),
@@ -424,7 +438,8 @@ def deploy_graph(req: DeployRequest):
             "schema_name": cfg.schema_name,
             "experiment_base": cfg.experiment_base,
             "lakebase_conn_string": req.lakebase_conn_string,
-            "bundle_path": source_path,
+            "git_ref": git_ref,
+            "deployed_by": deployed_by,
         })
         run_response = w.jobs.run_now(
             job_id=int(cfg.deploy_job_id),

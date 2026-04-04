@@ -2,22 +2,21 @@
 
 # COMMAND ----------
 
-# MAGIC %pip install databricks-langchain langgraph langchain-community mlflow typing_extensions --upgrade --quiet
-# MAGIC dbutils.library.restartPython()
+# COMMAND ----------
+
+import json, subprocess
+params = json.loads(dbutils.widgets.get("params_json"))  # noqa: F821
+git_ref = params.get("git_ref", "main")
+pkg = f"git+https://github.com/btbeal-db/agent-sweet.git@{git_ref}"
+print(f"Installing {pkg}")
+subprocess.check_call(["pip", "install", pkg, "--upgrade", "--quiet"])
+dbutils.library.restartPython()  # noqa: F821
 
 # COMMAND ----------
 
 import json
-import os
-import sys
 import tempfile
 from pathlib import Path
-
-# Parse parameters and add bundle path to sys.path for backend imports
-params = json.loads(dbutils.widgets.get("params_json"))  # noqa: F821
-bundle_path = params.get("bundle_path", "")
-if bundle_path:
-    sys.path.insert(0, bundle_path)
 
 import mlflow
 from databricks.sdk import WorkspaceClient
@@ -41,6 +40,7 @@ catalog = params["catalog"]
 schema_name = params["schema_name"]
 experiment_base = params["experiment_base"]
 lakebase_conn_string = params.get("lakebase_conn_string", "")
+deployed_by = params.get("deployed_by", "unknown")
 
 fq_model_name = f"{catalog}.{schema_name}.{model_name}"
 endpoint_name = model_name.replace("_", "-")
@@ -48,6 +48,7 @@ experiment_path = f"{experiment_base}/{model_name}"
 
 print(f"Model: {fq_model_name}")
 print(f"Experiment: {experiment_path}")
+print(f"Deployed by: {deployed_by}")
 print(f"Endpoint: {endpoint_name}")
 
 # COMMAND ----------
@@ -64,7 +65,8 @@ with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
 
 resources = extract_resources(graph_def)
 
-backend_dir = Path(__file__).parent if "__file__" in dir() else Path(bundle_path) / "backend"
+import backend
+backend_dir = Path(backend.__file__).parent
 python_model_path = str(backend_dir / "mlflow_model.py")
 
 code_paths = collect_code_paths()
@@ -72,6 +74,11 @@ code_paths = collect_code_paths()
 requirements_path = backend_dir.parent / "requirements-serving.txt"
 
 with mlflow.start_run() as run:
+    # Tag the run with provenance info
+    mlflow.set_tag("deployed_by", deployed_by)
+    mlflow.set_tag("agent_name", model_name)
+    mlflow.set_tag("endpoint_name", endpoint_name)
+
     log_kwargs = dict(
         artifact_path="agent",
         python_model=python_model_path,

@@ -17,3 +17,5 @@ env:
     value: "agent_builder"
   # - name: LAKEBASE_TRACE_CONN_STRING
   #   value: "postgresql://..."
+  # - name: LAKEBASE_TRACE_CONN_STRING
+  #   value: "postgresql://..."

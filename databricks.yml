@@ -23,7 +23,9 @@ resources:
         - environment_key: default
           spec:
             client: "1"
-      max_concurrent_runs: 5
+      max_concurrent_runs: 20
+      queue:
+        enabled: true
 
   apps:
     agent_builder:
