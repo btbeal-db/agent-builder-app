@@ -1,23 +1,32 @@
-# Databricks Asset Bundles configuration for Agent Builder
+# Databricks Asset Bundles configuration for Agent Sweet
 #
-# Deploy workflow:
-#   1. Build the frontend:  cd frontend && npm run build
-#   2. Deploy the bundle:   databricks bundle deploy -t dev
+# This bundle provisions the deploy Job and App with all resources
+# and scopes. The app itself deploys from Git — not from the
+# bundle's source_code_path.
 #
-# The frontend must be built before deploying — the build output
-# lives in backend/static/ and is served by FastAPI at runtime.
+# Usage:
+#   ./deploy.sh --profile MY_PROFILE
 
 bundle:
-  name: agent-builder-app
+  name: agent-sweet
+
+sync:
+  exclude:
+    - frontend/node_modules/
+    - node_modules/
+    - .venv/
+    - __pycache__/
+    - .git/
+    - demo/
 
 resources:
   jobs:
     deploy_job:
-      name: agent-builder-deploy-${bundle.target}
+      name: agent-sweet-deploy-${bundle.target}
       tasks:
         - task_key: deploy
           notebook_task:
-            notebook_path: /Shared/agent-builder/deploy_notebook
+            notebook_path: backend/deploy_notebook.py
           environment_key: default
       environments:
         - environment_key: default
@@ -28,8 +37,8 @@ resources:
         enabled: true
 
   apps:
-    agent_builder:
-      name: agent-builder-${bundle.target}
+    agent_sweet:
+      name: agent-sweet-${bundle.target}
       description: "Visual drag-and-drop LangGraph agent builder for Databricks"
       source_code_path: .
       resources:
@@ -43,7 +52,6 @@ resources:
         - catalog.tables:read
         - dashboards.genie
         - serving.serving-endpoints
-        - serving.serving-endpoints-data-plane
         - sql
         - vectorsearch.vector-search-endpoints
         - vectorsearch.vector-search-indexes

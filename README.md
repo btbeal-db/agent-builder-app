@@ -28,14 +28,12 @@ databricks auth login --host https://your-workspace.cloud.databricks.com --profi
 
 This single command:
 
-1. **Creates the App** linked to the [Agent Sweet Git repo](https://github.com/btbeal-db/agent-sweet.git)
-2. **Uploads the deploy notebook** to `/Shared/agent-sweet/deploy_notebook`
-3. **Creates the deploy Job** that handles MLflow logging, UC registration, and endpoint creation
-4. **Wires the Job as an App resource** so the app can trigger it
-5. **Sets user API scopes** (Vector Search, Genie, Serving, SQL, Catalog read)
-6. **Deploys the App** from the `main` branch
+1. **Uploads the deploy notebook** to `/Shared/agent-sweet/deploy_notebook`
+2. **Deploys the DAB** — creates the deploy Job and App with resources, scopes, and env vars (see `databricks.yml`)
+3. **Links the App** to the [Agent Sweet Git repo](https://github.com/btbeal-db/agent-sweet.git)
+4. **Deploys the App** from the `main` branch
 
-The script is idempotent — if the app or job already exists, it skips creation and updates the configuration.
+The script is idempotent — `databricks bundle deploy` handles create-or-update for all resources.
 
 ### 3. Grant the deploy Job permissions
 
@@ -70,8 +68,7 @@ Or deploy from the Databricks Apps UI: **App details → Deploy → From Git →
 |---|---|
 | `--profile <name>` | Databricks CLI profile to use (required) |
 | `--branch <name>` | Git branch to deploy (default: `main`) |
-| `--app <name>` | App name (default: `agent-sweet`) |
-| `--repo <url>` | Override the Git repo URL |
+| `--target <name>` | DAB target (default: `dev`) |
 | `--deploy-only` | Skip setup, just deploy from Git |
 
 ## How Agent Deployment Works
@@ -162,6 +159,7 @@ backend/               FastAPI app + LangGraph agent engine
   mlflow_model.py      MLflow pyfunc wrapper for serving deployed agents
 demo/                  Optional: sample data setup script
 app.yaml               Databricks Apps runtime config
+databricks.yml         DAB definition (Job, App resources, scopes, env vars)
 deploy.sh              One-time admin setup + deploy script
 ```
 
@@ -185,7 +183,7 @@ See [CONTRIB.md](CONTRIB.md) for how to create and register new node types.
 
 | Issue | Fix |
 |---|---|
-| Deploy modal says "App not configured" | Set `DEPLOY_JOB_ID` in `app.yaml` |
+| Deploy modal says "App not configured" | Run `deploy.sh` — the DAB injects `DEPLOY_JOB_ID` as an app env var |
 | Deploy Job fails with pip install error | Ensure the Git repo is accessible from the Job cluster (public repo, or configure Git credentials) |
 | Endpoint container build fails | Check `requirements-serving.txt` targets Python 3.10 (`uv pip compile pyproject.toml -o requirements-serving.txt --python-version 3.10`) |
 | Vector Search / Genie 403 errors in playground | Run `deploy.sh` again to set scopes, or add them manually via `databricks api patch` |

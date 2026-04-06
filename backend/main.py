@@ -94,12 +94,23 @@ app.add_middleware(OBOMiddleware)
 
 
 # ── App deployment config ────────────────────────────────────────────────────
-# These env vars are set by the app admin to configure where models are
-# registered and experiments are stored.  The SP must have access to the
-# catalog/schema (add them as App Resources in the Databricks Apps UI).
 
 _EXPERIMENT_BASE = os.environ.get("EXPERIMENT_BASE", "/Shared/agent-builder")
+
+# DEPLOY_JOB_ID: try env var first (local dev), then discover from app resources.
 _DEPLOY_JOB_ID = os.environ.get("DEPLOY_JOB_ID", "")
+if not _DEPLOY_JOB_ID:
+    try:
+        _app_name = os.environ.get("DATABRICKS_APP_NAME", "")
+        if _app_name:
+            _app_info = WorkspaceClient().apps.get(_app_name)
+            for r in _app_info.resources or []:
+                if r.name == "deploy-job" and r.job:
+                    _DEPLOY_JOB_ID = r.job.id
+                    logger.info("Discovered DEPLOY_JOB_ID=%s from app resources", _DEPLOY_JOB_ID)
+                    break
+    except Exception as e:
+        logger.warning("Could not discover deploy job ID from app resources: %s", e)
 
 
 def _get_app_config() -> AppConfig:

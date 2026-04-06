@@ -8,10 +8,6 @@ command:
 # DATABRICKS_HOST, DATABRICKS_CLIENT_ID, DATABRICKS_CLIENT_SECRET, and
 # DATABRICKS_WORKSPACE_ID are automatically injected by the platform.
 # The user's OBO token arrives in the x-forwarded-access-token request header.
-env:
-  - name: DEPLOY_JOB_ID
-    value: "1046790565000568"
-  # - name: LAKEBASE_TRACE_CONN_STRING
-  #   value: "postgresql://..."
-  # - name: LAKEBASE_TRACE_CONN_STRING
-  #   value: "postgresql://..."
+#
+# DEPLOY_JOB_ID is auto-discovered from the app's resources at startup.
+# For local dev, set it as an env var.
