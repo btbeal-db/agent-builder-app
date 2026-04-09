@@ -9,7 +9,11 @@ command:
 # DATABRICKS_WORKSPACE_ID are automatically injected by the platform.
 # The user's OBO token arrives in the x-forwarded-access-token request header.
 #
-# Add any additional env vars below:
+# In production, SETUP_TABLE and SQL_WAREHOUSE_ID are set automatically by
+# the bundle deploy (see databricks.yml config.env). For local dev, set them
+# manually if you want setup to work:
 # env:
-#   - name: LAKEBASE_TRACE_CONN_STRING
-#     value: "postgresql://..."
+#   - name: SETUP_TABLE
+#     value: "main.agent_builder.agent_builder_user_setup"
+#   - name: SQL_WAREHOUSE_ID
+#     value: "your-warehouse-id"

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { ReactFlowProvider } from "@xyflow/react";
-import { Home, Hammer, HelpCircle, Trash2, CloudDownload, Save, Upload, MessageSquare, Rocket, Sparkles } from "lucide-react";
+import { Home, Hammer, HelpCircle, Trash2, CloudDownload, Save, Upload, MessageSquare, Rocket, Sparkles, Settings } from "lucide-react";
 import Canvas from "./components/Canvas";
 import NodePalette from "./components/NodePalette";
 import StateModelModal from "./components/StateModelModal";
@@ -11,11 +11,12 @@ import HomePage from "./components/HomePage";
 import HelpPage from "./components/HelpPage";
 import BuilderWalkthrough from "./components/BuilderWalkthrough";
 import AIChatDropdown from "./components/AIChatDropdown";
+import SetupPage from "./components/SetupPage";
 import { StateProvider } from "./StateContext";
-import { fetchNodeTypes, loadGraphFromRun } from "./api";
-import type { NodeTypeMetadata, GraphDef, StateFieldDef } from "./types";
+import { fetchNodeTypes, loadGraphFromRun, getSetupStatus } from "./api";
+import type { NodeTypeMetadata, GraphDef, StateFieldDef, SetupStatusResponse } from "./types";
 
-type AppView = "home" | "builder" | "help";
+type AppView = "home" | "builder" | "help" | "setup";
 
 export default function App() {
   const [nodeTypes, setNodeTypes] = useState<NodeTypeMetadata[]>([]);
@@ -45,6 +46,8 @@ export default function App() {
   const [showWalkthrough, setShowWalkthrough] = useState(false);
   const hasOpenedBuilder = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [setupStatus, setSetupStatus] = useState<SetupStatusResponse | null>(null);
+  const [experimentPath, setExperimentPath] = useState<string | null>(null);
 
   const stateVariableNames = stateFields.flatMap((f) => {
     const paths = [f.name];
@@ -60,6 +63,14 @@ export default function App() {
 
   useEffect(() => {
     fetchNodeTypes().then(setNodeTypes).catch(console.error);
+    getSetupStatus()
+      .then((status) => {
+        setSetupStatus(status);
+        if (status.setup_complete && status.experiment_path) {
+          setExperimentPath(status.experiment_path);
+        }
+      })
+      .catch(console.error);
   }, []);
 
   const handleSaveJson = useCallback(() => {
@@ -250,6 +261,14 @@ export default function App() {
               <HelpCircle size={18} />
               <span>Help</span>
             </button>
+            <button
+              className={`nav-rail-btn${view === "setup" ? " active" : ""}`}
+              onClick={() => setView("setup")}
+              title="Setup"
+            >
+              <Settings size={18} />
+              <span>Setup</span>
+            </button>
           </nav>
 
           {view === "home" && (
@@ -258,6 +277,18 @@ export default function App() {
 
           {view === "help" && (
             <HelpPage onGoToBuilder={openBuilder} />
+          )}
+
+          {view === "setup" && (
+            <SetupPage
+              setupStatus={setupStatus}
+              onSetupComplete={(path) => {
+                setExperimentPath(path);
+                setSetupStatus((prev) =>
+                  prev ? { ...prev, setup_complete: true, experiment_path: path } : prev
+                );
+              }}
+            />
           )}
 
           <div className="builder-container" style={{ display: view === "builder" ? "contents" : "none" }}>
@@ -308,6 +339,8 @@ export default function App() {
           graphGetter={graphGetter}
           stateFieldsRef={stateFieldsRef}
           onClose={() => setShowDeploy(false)}
+          defaultExperimentPath={experimentPath ?? ""}
+          onGoToSetup={() => { setShowDeploy(false); setView("setup"); }}
         />
       )}
 

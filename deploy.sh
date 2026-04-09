@@ -8,10 +8,15 @@ set -euo pipefail
 #   ./deploy.sh dev --profile MY_PROFILE       # specify target + profile
 #   ./deploy.sh dev --clean                    # clear stale state
 #
+# Bundle variables (catalog, schema, warehouse) are set in databricks.yml.
+# Override at deploy time with:
+#   databricks bundle deploy -t dev --var="setup_catalog=my_catalog" --var="sql_warehouse_id=abc123"
+#
 # Normal flow (after first init):
 #   1. Builds frontend → backend/static/
-#   2. bundle deploy   → syncs files to workspace + updates app config
+#   2. bundle deploy   → syncs files, creates schema, sets env vars on the app
 #   3. apps deploy     → tells the running app to pick up new code (no compute restart)
+#   4. On first request the app auto-creates the setup config table if it doesn't exist
 
 # ── Prerequisites ────────────────────────────────────────────────────────────
 command -v databricks >/dev/null 2>&1 || { echo "ERROR: 'databricks' CLI not found. See: https://docs.databricks.com/dev-tools/cli/install.html"; exit 1; }
@@ -75,7 +80,7 @@ if [[ "$CLEAN" == true ]] && [[ -f "$STATE_FILE" ]]; then
   rm "$STATE_FILE"
 fi
 
-# 3. Sync files + update app config (scopes, env vars, etc.)
+# 3. Sync files + update app config (scopes, env vars, schema creation)
 echo "── Syncing bundle..."
 databricks bundle deploy -t "$TARGET"
 

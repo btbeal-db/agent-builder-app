@@ -6,16 +6,50 @@
 #
 # The frontend must be built before deploying — the build output
 # lives in backend/static/ and is served by FastAPI at runtime.
+#
+# Bundle variables (set via CLI --var, env BUNDLE_VAR_*, or target config):
+#   setup_catalog      — Unity Catalog catalog for the setup config table
+#   setup_schema       — Schema name for the setup config table
+#   sql_warehouse_id   — SQL warehouse ID used by the app for setup queries
 
 bundle:
   name: agent-builder-app
 
+variables:
+  setup_catalog:
+    description: "Catalog for the Agent Builder setup config table"
+    default: "main"
+  setup_schema:
+    description: "Schema for the Agent Builder setup config table"
+    default: "agent_builder"
+  sql_warehouse_id:
+    description: "SQL warehouse ID for setup table queries"
+
 resources:
+  schemas:
+    agent_builder_schema:
+      catalog_name: ${var.setup_catalog}
+      name: ${var.setup_schema}
+      comment: "Schema for Agent Builder app configuration"
+
   apps:
     agent_builder:
       name: agent-builder-${bundle.target}
       description: "Visual drag-and-drop LangGraph agent builder for Databricks"
       source_code_path: .
+      config:
+        command:
+          - uvicorn
+          - backend.main:app
+          - --host
+          - 0.0.0.0
+          - --port
+          - "8000"
+        env:
+          - name: SETUP_TABLE
+            value: "${var.setup_catalog}.${var.setup_schema}.agent_builder_user_setup"
+          - name: SQL_WAREHOUSE_ID
+            value: "${var.sql_warehouse_id}"
       user_api_scopes:
         - sql
         - serving.serving-endpoints

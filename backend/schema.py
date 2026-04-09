@@ -116,3 +116,37 @@ class DeployResponse(BaseModel):
     endpoint_url: str = ""
     model_version: str = ""
     error: str | None = None
+
+
+# ── Setup (MLflow experiment one-time config) ────────────────────────────────
+
+class SetupStatusResponse(BaseModel):
+    setup_complete: bool
+    user_email: str
+    sp_display_name: str
+    experiment_path: str | None = None
+
+
+class SetupInfoResponse(BaseModel):
+    user_email: str
+    sp_display_name: str
+    sp_id: str
+
+
+class SetupGrantRequest(BaseModel):
+    experiment_path: str
+
+
+class SetupGrantResponse(BaseModel):
+    success: bool
+    manual_instructions: str | None = None
+
+
+class SetupValidateRequest(BaseModel):
+    experiment_path: str
+
+
+class SetupValidateResponse(BaseModel):
+    success: bool
+    experiment_id: str | None = None
+    error: str | None = None

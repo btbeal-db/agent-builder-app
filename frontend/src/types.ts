@@ -120,3 +120,29 @@ export interface ChatMessage {
   mlflow_trace?: TraceSpan[];
   loading?: boolean;
 }
+
+// ── Setup (MLflow experiment one-time config) ──────────────────────────────
+
+export interface SetupStatusResponse {
+  setup_complete: boolean;
+  user_email: string;
+  sp_display_name: string;
+  experiment_path: string | null;
+}
+
+export interface SetupInfoResponse {
+  user_email: string;
+  sp_display_name: string;
+  sp_id: string;
+}
+
+export interface SetupGrantResponse {
+  success: boolean;
+  manual_instructions: string | null;
+}
+
+export interface SetupValidateResponse {
+  success: boolean;
+  experiment_id: string | null;
+  error: string | null;
+}

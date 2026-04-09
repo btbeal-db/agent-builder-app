@@ -46,3 +46,22 @@ def get_workspace_client() -> WorkspaceClient:
         finally:
             os.environ.update(masked)
     return WorkspaceClient()
+
+
+def get_sp_workspace_client() -> WorkspaceClient:
+    """Return a WorkspaceClient using the app's service principal credentials.
+
+    Unlike :func:`get_workspace_client`, this always uses the SP env vars
+    regardless of whether an OBO token is available.  Use this for operations
+    that must run as the application identity (e.g. MLflow experiment access,
+    config table reads/writes).
+    """
+    host = os.environ.get("DATABRICKS_HOST", "")
+    client_id = os.environ.get("DATABRICKS_CLIENT_ID", "")
+    client_secret = os.environ.get("DATABRICKS_CLIENT_SECRET", "")
+    if not all([host, client_id, client_secret]):
+        raise RuntimeError(
+            "Service principal credentials not available in environment. "
+            "Expected DATABRICKS_HOST, DATABRICKS_CLIENT_ID, and DATABRICKS_CLIENT_SECRET."
+        )
+    return WorkspaceClient(host=host, client_id=client_id, client_secret=client_secret)

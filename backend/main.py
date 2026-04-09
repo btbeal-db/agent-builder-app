@@ -37,6 +37,7 @@ from .auth import set_user_token, get_workspace_client
 from .ai_chat import AIChatRequest, AIChatResponse, handle_ai_chat
 from .graph_builder import build_graph, filter_output, run_graph
 from .nodes import get_all_metadata
+from .setup import router as setup_router, ensure_setup_table
 from .schema import (
     DeployEvent,
     DeployMode,
@@ -132,6 +133,11 @@ def _collect_code_paths() -> list[str]:
 
 app = FastAPI(title="Agent Builder", version="0.1.0")
 
+
+@app.on_event("startup")
+def _startup():
+    ensure_setup_table()
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -154,6 +160,8 @@ class OBOMiddleware(BaseHTTPMiddleware):
 
 
 app.add_middleware(OBOMiddleware)
+
+app.include_router(setup_router, prefix="/api/setup", tags=["setup"])
 
 
 # ── Preview session store (in-memory, per-process) ────────────────────────────
@@ -455,6 +463,17 @@ def deploy_graph(req: DeployRequest):
                      f"Logging model to experiment {req.experiment_path}...")
         model_info = None
         try:
+            # Ensure the parent directory is visible to the SP before
+            # creating the experiment (Genesis Workbench pattern).
+            # The experiment_path should be like /Users/user/folder/experiment,
+            # so the parent is the folder the user granted SP access to.
+            from .auth import get_sp_workspace_client as _get_sp
+            exp_parent = req.experiment_path.rsplit("/", 1)[0]
+            try:
+                _get_sp().workspace.mkdirs(exp_parent)
+            except Exception:
+                pass  # best-effort; the folder may already exist
+
             mlflow.set_tracking_uri("databricks")
             mlflow.set_registry_uri("databricks-uc")
             experiment = mlflow.set_experiment(req.experiment_path)
@@ -519,31 +538,9 @@ def deploy_graph(req: DeployRequest):
                     f"Model name must be catalog.schema.model_name format, "
                     f"got '{req.model_name}'"
                 )
-            catalog, schema_name, _ = parts
-
-            w = get_workspace_client()
-            # Pre-validate catalog exists
-            try:
-                w.catalogs.get(catalog)
-            except Exception:
-                raise ValueError(
-                    f"Catalog '{catalog}' does not exist or you don't have "
-                    f"access to it. Verify the catalog name and your permissions."
-                )
-
-            # Pre-validate or create schema
-            try:
-                w.schemas.get(f"{catalog}.{schema_name}")
-            except Exception:
-                try:
-                    w.schemas.create(name=schema_name, catalog_name=catalog)
-                    logger.info("Created schema %s.%s", catalog, schema_name)
-                except Exception as schema_err:
-                    raise ValueError(
-                        f"Schema '{catalog}.{schema_name}' does not exist and "
-                        f"could not be created: {schema_err}"
-                    )
-
+            # Registration uses the SP credentials (via MLflow env vars),
+            # so we skip OBO pre-validation — the OBO token doesn't have
+            # catalog API scopes anyway.
             mv = mlflow.register_model(
                 model_uri=model_info.model_uri,
                 name=req.model_name,
@@ -569,6 +566,10 @@ def deploy_graph(req: DeployRequest):
         yield _emit("create_endpoint", DeployStepStatus.RUNNING,
                      "Creating serving endpoint...")
         try:
+            # The entire deploy flow uses SP credentials — OBO tokens
+            # lack scopes for MLflow, UC catalog, and serving endpoint APIs.
+            from .auth import get_sp_workspace_client as _get_sp
+            w = _get_sp()
             endpoint_name = req.model_name.split(".")[-1].replace("_", "-")
 
             env_vars = {
