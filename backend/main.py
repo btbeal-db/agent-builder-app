@@ -566,6 +566,7 @@ def deploy_graph(req: DeployRequest):
         yield _emit("create_endpoint", DeployStepStatus.RUNNING,
                      "Creating serving endpoint...")
         try:
+            w = get_workspace_client()
             endpoint_name = req.model_name.split(".")[-1].replace("_", "-")
 
             env_vars = {
