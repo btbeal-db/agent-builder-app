@@ -566,7 +566,10 @@ def deploy_graph(req: DeployRequest):
         yield _emit("create_endpoint", DeployStepStatus.RUNNING,
                      "Creating serving endpoint...")
         try:
-            w = get_workspace_client()
+            # The entire deploy flow uses SP credentials — OBO tokens
+            # lack scopes for MLflow, UC catalog, and serving endpoint APIs.
+            from .auth import get_sp_workspace_client as _get_sp
+            w = _get_sp()
             endpoint_name = req.model_name.split(".")[-1].replace("_", "-")
 
             env_vars = {
