@@ -12,7 +12,7 @@ interface Props {
 }
 
 const STEPS: { key: Step; label: string; icon: typeof FolderOpen }[] = [
-  { key: "create", label: "Create Directory", icon: FolderOpen },
+  { key: "create", label: "Create Folder", icon: FolderOpen },
   { key: "grant", label: "Grant Access", icon: Shield },
   { key: "validate", label: "Validate", icon: Search },
 ];
@@ -48,7 +48,7 @@ export default function SetupPage({ setupStatus, onSetupComplete }: Props) {
       .then((data) => {
         setInfo(data);
         if (!experimentPath && data.user_email) {
-          setExperimentPath(`/Users/${data.user_email}/agent-builder`);
+          setExperimentPath(`/Users/${data.user_email}/agent-sweet`);
         }
       })
       .catch(console.error)
@@ -178,29 +178,29 @@ export default function SetupPage({ setupStatus, onSetupComplete }: Props) {
         </div>
       )}
 
-      {/* Step 1: Create Directory */}
+      {/* Step 1: Create Folder */}
       {!isComplete && currentStep === "create" && (
         <div className="setup-card">
-          <h2>Step 1: Create Your Experiment Directory</h2>
+          <h2>Step 1: Create Your Experiments Folder</h2>
           <p>
             Create a folder in your Databricks workspace that will hold your MLflow
-            experiments. This folder must exist before we can grant the app access.
+            experiments. The app will create experiments inside this folder when you deploy.
           </p>
           <div className="setup-instructions-box">
             <ol>
               <li>Open your Databricks workspace</li>
               <li>Navigate to <strong>Workspace</strong> in the left sidebar</li>
               <li>Go to <strong>Users &gt; {info?.user_email || "your-email"}</strong></li>
-              <li>Right-click &gt; <strong>Create &gt; Folder</strong></li>
-              <li>Name it <code>agent-builder</code> (or any name you prefer)</li>
+              <li>Click the kebab menu (<strong>&#8942;</strong>) &gt; <strong>Create &gt; Folder</strong></li>
+              <li>Name it <code>agent-sweet</code> (or any name you prefer)</li>
             </ol>
           </div>
           <div className="setup-field">
-            <label>Enter the path of the directory you created:</label>
+            <label>Enter the full path of the experiment you created:</label>
             <input
               type="text"
               className="deploy-input"
-              placeholder={`/Users/${info?.user_email || "you@company.com"}/agent-builder`}
+              placeholder={`/Users/${info?.user_email || "you@company.com"}/agent-sweet`}
               value={experimentPath}
               onChange={(e) => setExperimentPath(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handlePathConfirm()}

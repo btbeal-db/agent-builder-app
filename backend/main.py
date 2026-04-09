@@ -463,6 +463,14 @@ def deploy_graph(req: DeployRequest):
                      f"Logging model to experiment {req.experiment_path}...")
         model_info = None
         try:
+            # Ensure the experiment directory is visible to the SP before
+            # creating the experiment (same pattern as Genesis Workbench).
+            from .auth import get_sp_workspace_client as _get_sp
+            try:
+                _get_sp().workspace.mkdirs(req.experiment_path.rsplit("/", 1)[0])
+            except Exception:
+                pass  # best-effort; the folder may already exist
+
             mlflow.set_tracking_uri("databricks")
             mlflow.set_registry_uri("databricks-uc")
             experiment = mlflow.set_experiment(req.experiment_path)

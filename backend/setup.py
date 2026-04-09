@@ -214,11 +214,12 @@ def grant_access(req: SetupGrantRequest):
                 success=False,
                 manual_instructions=(
                     f"Could not find a workspace object at '{req.experiment_path}'. "
-                    "Make sure you created the directory first."
+                    "Make sure you created the folder first."
                 ),
             )
 
-        # Grant the SP CAN_MANAGE via the Permissions API
+        # Grant the SP CAN_MANAGE via the Permissions API.
+        # Workspace folders use the "directories" object type.
         w.permissions.update(
             "directories",
             str(obj.object_id),
@@ -252,31 +253,43 @@ def validate_setup(req: SetupValidateRequest):
     """Validate that the SP can access the experiment path, then persist the record."""
     email = _get_user_email()
 
-    # Test SP access to the experiment path
+    # Validate SP access by creating a test experiment inside the user's folder.
+    # Following the Genesis Workbench pattern: call workspace.mkdirs() first to
+    # ensure the directory exists from the SP's perspective, then set_experiment().
+    # The SP can do this because it has "Can Manage" on the folder — it doesn't
+    # need access to the parent directory (e.g. /Users/user@company.com).
+    test_path = f"{req.experiment_path.rstrip('/')}/__setup_test__"
     try:
         sp = get_sp_workspace_client()
-        host = os.environ.get("DATABRICKS_HOST", "")
 
-        # Configure MLflow to use SP credentials
+        # Ensure the directory is visible to the SP via Workspace API
+        sp.workspace.mkdirs(req.experiment_path)
+
+        # Now create a test experiment inside it
         mlflow.set_tracking_uri("databricks")
         os.environ["MLFLOW_TRACKING_URI"] = "databricks"
 
-        # Temporarily set SP credentials for MLflow
         prev_token = os.environ.pop("MLFLOW_TRACKING_TOKEN", None)
         try:
-            experiment = mlflow.set_experiment(req.experiment_path)
+            experiment = mlflow.set_experiment(test_path)
+            experiment_id = experiment.experiment_id
+
+            # Clean up the test experiment
+            try:
+                mlflow.delete_experiment(experiment_id)
+            except Exception:
+                pass  # non-critical
         finally:
             if prev_token is not None:
                 os.environ["MLFLOW_TRACKING_TOKEN"] = prev_token
 
-        experiment_id = experiment.experiment_id
     except Exception as exc:
-        logger.warning("SP cannot access experiment at %s: %s", req.experiment_path, exc)
+        logger.warning("SP cannot access directory at %s: %s", req.experiment_path, exc)
         return SetupValidateResponse(
             success=False,
             error=(
                 f"The service principal cannot access '{req.experiment_path}'. "
-                f"Make sure you granted 'Can Manage' permission. Error: {exc}"
+                f"Make sure you granted 'Can Manage' permission on the folder. Error: {exc}"
             ),
         )
 
