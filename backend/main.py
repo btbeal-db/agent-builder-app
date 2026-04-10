@@ -543,9 +543,14 @@ def deploy_graph(req: DeployRequest):
 
             # When a PAT is provided, use it for UC operations so the model
             # is registered under the user's identity and permissions.
-            # Otherwise fall back to the SP.
+            # We must mask the SP OAuth env vars before creating the client,
+            # otherwise the SDK sees both oauth + pat and rejects it.
             host = os.environ.get("DATABRICKS_HOST", "")
+            _masked_sp = {}
             if req.pat:
+                for key in ("DATABRICKS_CLIENT_ID", "DATABRICKS_CLIENT_SECRET"):
+                    if key in os.environ:
+                        _masked_sp[key] = os.environ.pop(key)
                 uc_client = WorkspaceClient(host=host, token=req.pat)
             else:
                 from .auth import get_sp_workspace_client as _get_sp
@@ -611,10 +616,12 @@ def deploy_graph(req: DeployRequest):
 
             result_data["model_version"] = str(mv.version)
         except Exception as e:
+            os.environ.update(_masked_sp)
             mlflow.end_run()
             yield _emit("register_model", DeployStepStatus.ERROR,
                         f"Registration failed: {e}")
             return
+        os.environ.update(_masked_sp)
         mlflow.end_run()
         yield _emit("register_model", DeployStepStatus.DONE,
                      f"Registered as {req.model_name} v{mv.version}")
@@ -631,7 +638,11 @@ def deploy_graph(req: DeployRequest):
                      "Creating serving endpoint...")
         try:
             # Use PAT for endpoint creation if provided, otherwise SP.
+            _masked_sp2 = {}
             if req.pat:
+                for key in ("DATABRICKS_CLIENT_ID", "DATABRICKS_CLIENT_SECRET"):
+                    if key in os.environ:
+                        _masked_sp2[key] = os.environ.pop(key)
                 w = WorkspaceClient(host=host, token=req.pat)
             else:
                 from .auth import get_sp_workspace_client as _get_sp
@@ -692,9 +703,11 @@ def deploy_graph(req: DeployRequest):
                 f"{host}/serving-endpoints/{endpoint_name}/invocations"
             )
         except Exception as e:
+            os.environ.update(_masked_sp2)
             yield _emit("create_endpoint", DeployStepStatus.ERROR,
                         f"Endpoint creation failed: {e}")
             return
+        os.environ.update(_masked_sp2)
         yield _emit("create_endpoint", DeployStepStatus.DONE,
                      f"Endpoint ready: {endpoint_name}")
 
