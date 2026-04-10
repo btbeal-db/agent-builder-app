@@ -573,36 +573,36 @@ def deploy_graph(req: DeployRequest):
                         f"could not be created: {schema_err}"
                     )
 
-            # Register model. When a PAT is provided, we create a fresh
-            # MlflowClient with the PAT. We must mask the SP's OAuth env
-            # vars so the new client doesn't see two auth methods, and set
-            # DATABRICKS_TOKEN to the PAT. The global mlflow.register_model()
-            # can't be used because MLflow caches its registry store with
-            # whatever auth was active at init time (the SP).
+            # Register model using PAT if provided. We bypass MLflow's
+            # register_model() because it caches the SP credentials and
+            # can't be overridden. Instead, use the PAT-authenticated
+            # WorkspaceClient to hit the UC REST API directly.
             if req.pat:
-                masked = {}
-                for key in ("DATABRICKS_CLIENT_ID", "DATABRICKS_CLIENT_SECRET"):
-                    if key in os.environ:
-                        masked[key] = os.environ.pop(key)
-                os.environ["DATABRICKS_TOKEN"] = req.pat
+                # Ensure the registered model exists
                 try:
-                    from mlflow import MlflowClient
-                    pat_client = MlflowClient(
-                        registry_uri="databricks-uc",
+                    uc_client.registered_models.get(req.model_name)
+                except Exception:
+                    uc_client.registered_models.create(
+                        catalog_name=catalog,
+                        schema_name=schema_name,
+                        name=parts[2],
                     )
-                    # Ensure the registered model exists in UC
-                    try:
-                        pat_client.get_registered_model(req.model_name)
-                    except Exception:
-                        pat_client.create_registered_model(req.model_name)
-                    mv = pat_client.create_model_version(
-                        name=req.model_name,
-                        source=model_info.model_uri,
-                        run_id=run.info.run_id,
-                    )
-                finally:
-                    os.environ.pop("DATABRICKS_TOKEN", None)
-                    os.environ.update(masked)
+                # Create model version via REST API (SDK doesn't expose this)
+                resp = uc_client.api_client.do(
+                    "POST",
+                    f"/api/2.0/mlflow/unity-catalog/model-versions/create",
+                    body={
+                        "name": req.model_name,
+                        "source": model_info.model_uri,
+                        "run_id": run.info.run_id,
+                    },
+                )
+                mv_version = resp.get("model_version", {}).get("version", "1")
+
+                class _ModelVersion:
+                    """Minimal shim so downstream code can read .version."""
+                    def __init__(self, v): self.version = v
+                mv = _ModelVersion(mv_version)
             else:
                 mv = mlflow.register_model(
                     model_uri=model_info.model_uri,
