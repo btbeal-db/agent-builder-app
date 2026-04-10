@@ -573,16 +573,23 @@ def deploy_graph(req: DeployRequest):
                         f"could not be created: {schema_err}"
                     )
 
-            # Register model — use PAT if provided, otherwise SP env vars
+            # Register model — use PAT if provided, otherwise SP env vars.
+            # When using the PAT we must mask the SP OAuth env vars so
+            # MLflow doesn't see two auth methods (oauth + pat).
             prev_token = os.environ.get("MLFLOW_TRACKING_TOKEN")
+            masked = {}
             if req.pat:
                 os.environ["MLFLOW_TRACKING_TOKEN"] = req.pat
+                for key in ("DATABRICKS_CLIENT_ID", "DATABRICKS_CLIENT_SECRET"):
+                    if key in os.environ:
+                        masked[key] = os.environ.pop(key)
             try:
                 mv = mlflow.register_model(
                     model_uri=model_info.model_uri,
                     name=req.model_name,
                 )
             finally:
+                os.environ.update(masked)
                 if prev_token is not None:
                     os.environ["MLFLOW_TRACKING_TOKEN"] = prev_token
                 elif "MLFLOW_TRACKING_TOKEN" in os.environ:
