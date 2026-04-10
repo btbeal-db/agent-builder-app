@@ -578,36 +578,43 @@ def deploy_graph(req: DeployRequest):
                         f"could not be created: {schema_err}"
                     )
 
-            # Register model using PAT if provided. We bypass MLflow's
-            # register_model() because it caches the SP credentials and
-            # can't be overridden. Instead, use the PAT-authenticated
-            # WorkspaceClient to hit the UC REST API directly.
+            # Register model. When a PAT is provided, run mlflow.register_model
+            # in a subprocess with a clean environment so the SP's OAuth
+            # credentials don't conflict.  MLflow caches DatabricksConfig
+            # in-process, so env-var masking alone isn't reliable.
             if req.pat:
-                # Ensure the registered model exists
-                try:
-                    uc_client.registered_models.get(req.model_name)
-                except Exception:
-                    uc_client.registered_models.create(
-                        catalog_name=catalog,
-                        schema_name=schema_name,
-                        name=parts[2],
-                    )
-                # Create model version via REST API (SDK doesn't expose this)
-                resp = uc_client.api_client.do(
-                    "POST",
-                    f"/api/2.0/mlflow/unity-catalog/model-versions/create",
-                    body={
-                        "name": req.model_name,
-                        "source": model_info.model_uri,
-                        "run_id": run.info.run_id,
-                    },
+                import subprocess
+                import sys
+                reg_env = {
+                    "DATABRICKS_HOST": host,
+                    "DATABRICKS_TOKEN": req.pat,
+                    "HOME": os.environ.get("HOME", "/tmp"),
+                    "PATH": os.environ.get("PATH", ""),
+                }
+                reg_script = (
+                    "import mlflow, json, sys; "
+                    "mlflow.set_registry_uri('databricks-uc'); "
+                    "mv = mlflow.register_model("
+                    f"  model_uri={model_info.model_uri!r},"
+                    f"  name={req.model_name!r},"
+                    "); "
+                    "print(json.dumps({'version': mv.version}))"
                 )
-                mv_version = resp.get("model_version", {}).get("version", "1")
+                proc = subprocess.run(
+                    [sys.executable, "-c", reg_script],
+                    capture_output=True, text=True, env=reg_env,
+                    timeout=300,
+                )
+                if proc.returncode != 0:
+                    raise RuntimeError(
+                        f"Model registration failed: {proc.stderr.strip()}"
+                    )
+                mv_data = json.loads(proc.stdout.strip())
 
                 class _ModelVersion:
                     """Minimal shim so downstream code can read .version."""
                     def __init__(self, v): self.version = v
-                mv = _ModelVersion(mv_version)
+                mv = _ModelVersion(mv_data["version"])
             else:
                 mv = mlflow.register_model(
                     model_uri=model_info.model_uri,
@@ -649,22 +656,6 @@ def deploy_graph(req: DeployRequest):
                 w = _get_sp()
             endpoint_name = req.model_name.split(".")[-1].replace("_", "-")
 
-            # Wait for model version to be READY before creating the endpoint
-            import time
-            for _ in range(60):
-                mv_info = w.model_versions.get(
-                    full_name=req.model_name,
-                    version=int(result_data["model_version"]),
-                )
-                if mv_info.status and mv_info.status.value == "READY":
-                    break
-                time.sleep(2)
-            else:
-                raise RuntimeError(
-                    f"Model version {result_data['model_version']} did not reach "
-                    f"READY status within 120s (current: {mv_info.status})"
-                )
-
             env_vars = {
                 "ENABLE_MLFLOW_TRACING": "true",
                 "MLFLOW_EXPERIMENT_ID": result_data.get("experiment_id", ""),
@@ -690,6 +681,8 @@ def deploy_graph(req: DeployRequest):
                 ),
             )
 
+            # Fire-and-forget: create (or update) the endpoint without
+            # waiting for it to become ready — that can take 10+ minutes.
             try:
                 w.serving_endpoints.create(
                     name=endpoint_name,
@@ -699,24 +692,29 @@ def deploy_graph(req: DeployRequest):
                     ),
                     ai_gateway=ai_gateway,
                 )
+                # create() returns a Wait object — don't call .result()
             except ResourceAlreadyExists:
                 w.serving_endpoints.update_config(
                     name=endpoint_name,
                     served_entities=[served_entity],
                 )
-                w.serving_endpoints.put_ai_gateway(
-                    name=endpoint_name,
-                    inference_table_config=AiGatewayInferenceTableConfig(
-                        catalog_name=parts[0],
-                        schema_name=parts[1],
-                        table_name_prefix=endpoint_name,
-                        enabled=True,
-                    ),
-                )
+                # update_config() also returns Wait — don't call .result()
+                try:
+                    w.serving_endpoints.put_ai_gateway(
+                        name=endpoint_name,
+                        inference_table_config=AiGatewayInferenceTableConfig(
+                            catalog_name=parts[0],
+                            schema_name=parts[1],
+                            table_name_prefix=endpoint_name,
+                            enabled=True,
+                        ),
+                    )
+                except Exception:
+                    pass  # non-critical
 
-            host = w.config.host.rstrip("/")
+            ep_host = host or w.config.host.rstrip("/")
             result_data["endpoint_url"] = (
-                f"{host}/serving-endpoints/{endpoint_name}/invocations"
+                f"{ep_host}/serving-endpoints/{endpoint_name}/invocations"
             )
         except Exception as e:
             os.environ.update(_masked_sp2)
