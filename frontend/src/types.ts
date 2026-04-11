@@ -109,12 +109,10 @@ export interface DeployRequest {
   experiment_path: string;
   deploy_mode: DeployMode;
   pat: string;
-  // Lakebase — option A: auto-provision
+  // Lakebase — option A: auto-provision a new project
   lakebase_project_id: string;
-  // Lakebase — option B: existing instance
-  lakebase_endpoint: string;
-  lakebase_host: string;
-  lakebase_database: string;
+  // Lakebase — option B: use an existing project
+  lakebase_existing_project_id: string;
   // Lakebase — option C: raw connection string (legacy)
   lakebase_conn_string: string;
 }

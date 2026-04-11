@@ -182,3 +182,70 @@ def provision_lakebase(
         host=host,
         database=database_id,
     )
+
+
+def resolve_lakebase(
+    w: WorkspaceClient,
+    project_id: str,
+    model_name: str,
+    sp_client_id: str,
+) -> LakebaseConfig:
+    """Resolve connection details for an existing Lakebase project.
+
+    Like :func:`provision_lakebase` but skips project creation — only looks up
+    the endpoint host, ensures the SP role exists, and creates the per-agent
+    database if it doesn't exist yet.
+    """
+    database_id = _model_name_to_database_id(model_name)
+    branch_path = f"projects/{project_id}/branches/{_DEFAULT_BRANCH}"
+    endpoint_path = f"{branch_path}/endpoints/{_DEFAULT_ENDPOINT}"
+
+    # Verify the project exists
+    w.postgres.get_project(name=f"projects/{project_id}")
+
+    # Get endpoint host
+    ep = w.postgres.get_endpoint(name=endpoint_path)
+    host = ep.status.hosts.host
+
+    # Ensure the SP role exists
+    try:
+        w.postgres.create_role(
+            parent=branch_path,
+            role=Role(
+                spec=RoleRoleSpec(
+                    identity_type=RoleIdentityType.SERVICE_PRINCIPAL,
+                ),
+            ),
+            role_id=sp_client_id,
+        ).wait()
+    except ResourceAlreadyExists:
+        pass
+
+    # Ensure the per-agent database exists
+    user_email = w.current_user.me().user_name
+    owner_role = None
+    for role in w.postgres.list_roles(parent=branch_path):
+        if role.status and role.status.postgres_role == user_email:
+            owner_role = role.name
+            break
+
+    if owner_role:
+        try:
+            w.postgres.create_database(
+                parent=branch_path,
+                database=Database(
+                    spec=DatabaseDatabaseSpec(
+                        postgres_database=database_id,
+                        role=owner_role,
+                    ),
+                ),
+                database_id=database_id,
+            ).wait()
+        except ResourceAlreadyExists:
+            pass
+
+    return LakebaseConfig(
+        endpoint=endpoint_path,
+        host=host,
+        database=database_id,
+    )

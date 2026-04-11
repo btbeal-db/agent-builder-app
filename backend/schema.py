@@ -111,12 +111,10 @@ class DeployRequest(BaseModel):
     pat: str = ""  # Optional PAT for UC registration + endpoint creation
 
     # Lakebase checkpointing — option A: auto-provision a new project
-    lakebase_project_id: str = ""  # e.g. "my-agent" → creates project + db
+    lakebase_project_id: str = ""  # e.g. "my-team" → creates project + db
 
-    # Lakebase checkpointing — option B: use an existing Lakebase instance
-    lakebase_endpoint: str = ""  # projects/{id}/branches/{b}/endpoints/{e}
-    lakebase_host: str = ""  # Postgres hostname
-    lakebase_database: str = ""  # Postgres database name
+    # Lakebase checkpointing — option B: use an existing Lakebase project
+    lakebase_existing_project_id: str = ""  # e.g. "my-team" → resolves details
 
     # Lakebase checkpointing — option C: raw connection string (legacy)
     lakebase_conn_string: str = ""

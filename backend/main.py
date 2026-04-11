@@ -48,7 +48,7 @@ from .auth import (
 from .ai_chat import AIChatRequest, AIChatResponse, handle_ai_chat
 from .graph_builder import build_graph, filter_output, run_graph
 from .nodes import get_all_metadata
-from .lakebase import LakebaseConfig, provision_lakebase
+from .lakebase import LakebaseConfig, provision_lakebase, resolve_lakebase
 from .setup import router as setup_router, ensure_setup_table
 from .schema import (
     DeployEvent,
@@ -531,14 +531,28 @@ def deploy_graph(req: DeployRequest):
             yield _emit("provision_lakebase", DeployStepStatus.DONE,
                         f"Lakebase ready (db: {lb_config.database})")
 
-        elif req.lakebase_endpoint and req.lakebase_host and req.lakebase_database:
-            lb_config = LakebaseConfig(
-                endpoint=req.lakebase_endpoint,
-                host=req.lakebase_host,
-                database=req.lakebase_database,
-            )
+        elif req.lakebase_existing_project_id:
+            yield _emit("provision_lakebase", DeployStepStatus.RUNNING,
+                        f"Resolving Lakebase project '{req.lakebase_existing_project_id}'...")
+            try:
+                if not req.pat:
+                    raise ValueError("A PAT is required to resolve Lakebase details")
+                masked = mask_sp_env_vars()
+                try:
+                    sp_client_id = os.environ.get("DATABRICKS_CLIENT_ID", "")
+                    w = create_pat_client(req.pat)
+                    lb_config = resolve_lakebase(
+                        w, req.lakebase_existing_project_id, req.model_name,
+                        sp_client_id,
+                    )
+                finally:
+                    os.environ.update(masked)
+            except Exception as e:
+                yield _emit("provision_lakebase", DeployStepStatus.ERROR,
+                            f"Lakebase resolution failed: {e}")
+                return
             yield _emit("provision_lakebase", DeployStepStatus.DONE,
-                        "Using existing Lakebase instance")
+                        f"Lakebase ready (db: {lb_config.database})")
 
         elif req.lakebase_conn_string:
             # Legacy: raw connection string — no provisioning step needed
