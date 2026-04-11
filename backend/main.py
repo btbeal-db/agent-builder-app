@@ -49,7 +49,7 @@ from .ai_chat import AIChatRequest, AIChatResponse, handle_ai_chat
 from .graph_builder import build_graph, filter_output, run_graph
 from .nodes import get_all_metadata
 from .lakebase import LakebaseConfig, provision_lakebase, resolve_lakebase
-from .setup import router as setup_router, ensure_setup_dir
+from .setup import router as setup_router
 from .schema import (
     DeployEvent,
     DeployMode,
@@ -143,10 +143,6 @@ def _collect_code_paths() -> list[str]:
 
 app = FastAPI(title="Agent Builder", version="0.1.0")
 
-
-@app.on_event("startup")
-def _startup():
-    ensure_setup_dir()
 
 app.add_middleware(
     CORSMiddleware,

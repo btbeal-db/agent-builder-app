@@ -3,7 +3,7 @@
 Each user creates a workspace directory for their MLflow experiments, then
 grants the app's service principal "Can Manage" on it.  This module provides
 the API endpoints that walk the user through that flow and persist the result
-in a workspace file so setup only happens once.
+in a workspace file (in the user's own directory) so setup only happens once.
 """
 
 from __future__ import annotations
@@ -29,41 +29,23 @@ from .schema import (
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-# Directory in the workspace where per-user setup configs are stored.
-_SETUP_DIR = "/Shared/.agent-builder/setup"
+# Config file stored in each user's own workspace directory (via OBO token).
+_SETUP_FILENAME = ".agent-builder-setup.json"
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 
-def _sanitize_email(email: str) -> str:
-    """Convert an email to a safe workspace filename component."""
-    return email.replace("@", "_at_").replace(".", "_dot_")
-
-
 def _user_config_path(email: str) -> str:
     """Return the workspace path for a user's setup config file."""
-    return f"{_SETUP_DIR}/{_sanitize_email(email)}.json"
-
-
-def ensure_setup_dir() -> None:
-    """Create the setup config directory if it doesn't exist.
-
-    Called once at app startup.
-    """
-    try:
-        sp = get_sp_workspace_client()
-        sp.workspace.mkdirs(_SETUP_DIR)
-        logger.info("Setup directory ready: %s", _SETUP_DIR)
-    except Exception as exc:
-        logger.warning("Could not create setup directory (will retry on first use): %s", exc)
+    return f"/Users/{email}/{_SETUP_FILENAME}"
 
 
 def _read_user_config(email: str) -> dict | None:
-    """Read a user's setup config from a workspace file."""
+    """Read a user's setup config from their workspace directory via OBO."""
     path = _user_config_path(email)
     try:
-        sp = get_sp_workspace_client()
-        resp = sp.workspace.export(path=path, format=ExportFormat.AUTO)
+        w = get_workspace_client()
+        resp = w.workspace.export(path=path, format=ExportFormat.AUTO)
         if resp.content:
             return json.loads(base64.b64decode(resp.content))
     except Exception:
@@ -72,16 +54,15 @@ def _read_user_config(email: str) -> dict | None:
 
 
 def _write_user_config(email: str, experiment_path: str) -> None:
-    """Write a user's setup config to a workspace file."""
+    """Write a user's setup config to their workspace directory via OBO."""
     path = _user_config_path(email)
     data = {
         "user_email": email,
         "experiment_path": experiment_path,
         "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
-    sp = get_sp_workspace_client()
-    sp.workspace.mkdirs(_SETUP_DIR)
-    sp.workspace.import_(
+    w = get_workspace_client()
+    w.workspace.import_(
         path=path,
         content=base64.b64encode(json.dumps(data, indent=2).encode()).decode(),
         format=ImportFormat.AUTO,
