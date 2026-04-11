@@ -119,13 +119,20 @@ def provision_lakebase(
     host = ep.status.hosts.host
     logger.info("Endpoint %s active at %s", endpoint_path, host)
 
-    # ── 3. Create the checkpoints database or reuse existing ──────
+    # ── 3. Resolve the owner role for the deploying user ────────────
+    user_email = w.current_user.me().user_name
+    owner_role = f"{branch_path}/roles/{user_email}"
+
+    # ── 4. Create the checkpoints database or reuse existing ──────
     try:
-        logger.info("Creating database %s in %s", database_id, branch_path)
+        logger.info("Creating database %s in %s (owner: %s)", database_id, branch_path, user_email)
         db_op = w.postgres.create_database(
             parent=branch_path,
             database=Database(
-                spec=DatabaseDatabaseSpec(postgres_database=database_id),
+                spec=DatabaseDatabaseSpec(
+                    postgres_database=database_id,
+                    role=owner_role,
+                ),
             ),
             database_id=database_id,
         )
