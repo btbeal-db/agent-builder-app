@@ -60,11 +60,11 @@ def _create_lakebase_checkpointer(
     # serving endpoint's auto-generated SP (which does not).
     sp_client_id = os.environ.get("LAKEBASE_SP_CLIENT_ID", "")
     sp_client_secret = os.environ.get("LAKEBASE_SP_CLIENT_SECRET", "")
-    db_host = os.environ.get("DATABRICKS_HOST", "")
+    sp_host = os.environ.get("LAKEBASE_SP_HOST", "") or os.environ.get("DATABRICKS_HOST", "")
 
-    if sp_client_id and sp_client_secret:
+    if sp_client_id and sp_client_secret and sp_host:
         w = WorkspaceClient(
-            host=db_host,
+            host=sp_host,
             client_id=sp_client_id,
             client_secret=sp_client_secret,
         )

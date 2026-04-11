@@ -688,9 +688,10 @@ def deploy_graph(req: DeployRequest):
 
         yield _emit("create_endpoint", DeployStepStatus.RUNNING,
                      "Creating serving endpoint...")
-        # Capture SP creds before masking — needed as env vars on the endpoint.
+        # Capture SP creds + host before masking — needed as env vars on the endpoint.
         sp_id_for_env = os.environ.get("DATABRICKS_CLIENT_ID", "")
         sp_secret_for_env = os.environ.get("DATABRICKS_CLIENT_SECRET", "")
+        sp_host_for_env = os.environ.get("DATABRICKS_HOST", "")
         masked = {}
         try:
             if req.pat:
@@ -713,6 +714,7 @@ def deploy_graph(req: DeployRequest):
                 # serving container uses it instead of the endpoint's own SP.
                 env_vars["LAKEBASE_SP_CLIENT_ID"] = sp_id_for_env
                 env_vars["LAKEBASE_SP_CLIENT_SECRET"] = sp_secret_for_env
+                env_vars["LAKEBASE_SP_HOST"] = sp_host_for_env
             elif req.lakebase_conn_string:
                 env_vars["LAKEBASE_CONN_STRING"] = req.lakebase_conn_string
 
