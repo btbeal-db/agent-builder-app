@@ -140,6 +140,7 @@ def provision_lakebase(
             role=Role(
                 spec=RoleRoleSpec(
                     identity_type=RoleIdentityType.SERVICE_PRINCIPAL,
+                    postgres_role=sp_client_id,
                 ),
             ),
             role_id=sp_client_id,
@@ -217,6 +218,7 @@ def resolve_lakebase(
             role=Role(
                 spec=RoleRoleSpec(
                     identity_type=RoleIdentityType.SERVICE_PRINCIPAL,
+                    postgres_role=sp_client_id,
                 ),
             ),
             role_id=sp_client_id,
