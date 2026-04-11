@@ -81,34 +81,42 @@ def _wait_for_endpoint(w: WorkspaceClient, endpoint_path: str) -> str:
     )
 
 
+
 def _ensure_sp_role(
     w: WorkspaceClient, branch_path: str, sp_client_id: str,
 ) -> None:
-    """Create a SERVICE_PRINCIPAL role on the branch (idempotent)."""
-    try:
-        logger.info("Ensuring Lakebase role for SP %s", sp_client_id)
-        w.postgres.create_role(
-            parent=branch_path,
-            role=Role(
-                spec=RoleRoleSpec(
-                    identity_type=RoleIdentityType.SERVICE_PRINCIPAL,
-                    postgres_role=sp_client_id,
-                ),
+    """Create a SERVICE_PRINCIPAL role on the branch if it doesn't exist."""
+    for role in w.postgres.list_roles(parent=branch_path):
+        if role.status and role.status.postgres_role == sp_client_id:
+            logger.info("SP role already exists for %s", sp_client_id)
+            return
+
+    logger.info("Creating Lakebase role for SP %s", sp_client_id)
+    w.postgres.create_role(
+        parent=branch_path,
+        role=Role(
+            spec=RoleRoleSpec(
+                identity_type=RoleIdentityType.SERVICE_PRINCIPAL,
+                postgres_role=sp_client_id,
             ),
-            role_id=sp_client_id,
-        ).wait()
-        logger.info("SP role created")
-    except (ResourceAlreadyExists, ResourceConflict):
-        logger.info("SP role already exists")
+        ),
+        role_id=sp_client_id,
+    ).wait()
+    logger.info("SP role created")
 
 
 def _ensure_database(
     w: WorkspaceClient, branch_path: str, database_id: str,
 ) -> None:
-    """Create the per-agent database (idempotent).
+    """Create the per-agent database if it doesn't exist.
 
     Resolves the deploying user's role to set as owner.
     """
+    for db in w.postgres.list_databases(parent=branch_path):
+        if db.name and db.name.endswith(f"/databases/{database_id}"):
+            logger.info("Database %s already exists", database_id)
+            return
+
     user_email = w.current_user.me().user_name
     owner_role = None
     for role in w.postgres.list_roles(parent=branch_path):
@@ -122,21 +130,18 @@ def _ensure_database(
             f"Ensure you have access to this project."
         )
 
-    try:
-        logger.info("Ensuring database %s in %s", database_id, branch_path)
-        w.postgres.create_database(
-            parent=branch_path,
-            database=Database(
-                spec=DatabaseDatabaseSpec(
-                    postgres_database=database_id,
-                    role=owner_role,
-                ),
+    logger.info("Creating database %s in %s", database_id, branch_path)
+    w.postgres.create_database(
+        parent=branch_path,
+        database=Database(
+            spec=DatabaseDatabaseSpec(
+                postgres_database=database_id,
+                role=owner_role,
             ),
-            database_id=database_id,
-        ).wait()
-        logger.info("Database %s ready", database_id)
-    except (ResourceAlreadyExists, ResourceConflict):
-        logger.info("Database %s already exists", database_id)
+        ),
+        database_id=database_id,
+    ).wait()
+    logger.info("Database %s ready", database_id)
 
 
 # ── Public API ───────────────────────────────────────────────────────────────
@@ -160,7 +165,13 @@ def provision_lakebase(
     endpoint_path = f"{branch_path}/endpoints/{_DEFAULT_ENDPOINT}"
 
     # 1. Create project (or reuse)
-    try:
+    project_exists = any(
+        p.name == f"projects/{project_id}"
+        for p in w.postgres.list_projects()
+    )
+    if project_exists:
+        logger.info("Project %s already exists, reusing", project_id)
+    else:
         display_name = f"{_DEFAULT_PROJECT_DISPLAY_PREFIX} – {project_id}"
         logger.info("Creating Lakebase project %s", project_id)
         w.postgres.create_project(
@@ -168,8 +179,6 @@ def provision_lakebase(
             project_id=project_id,
         ).wait()
         logger.info("Project %s ready", project_id)
-    except (ResourceAlreadyExists, ResourceConflict):
-        logger.info("Project %s already exists, reusing", project_id)
 
     # 2–4. Shared: wait for endpoint, ensure SP role, ensure database
     host = _wait_for_endpoint(w, endpoint_path)
