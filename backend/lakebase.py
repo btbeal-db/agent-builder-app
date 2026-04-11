@@ -107,36 +107,44 @@ def _ensure_sp_role(
 
 def _ensure_database(
     w: WorkspaceClient, branch_path: str, database_id: str,
+    sp_client_id: str,
 ) -> None:
     """Create the per-agent database if it doesn't exist.
 
-    Resolves the deploying user's role to set as owner.
+    The app's SP is set as owner so it can create checkpoint tables at
+    serving time.  If the database already exists with a different owner,
+    ownership is transferred to the SP.
     """
+    from google.protobuf.field_mask_pb2 import FieldMask
+
+    sp_role = f"{branch_path}/roles/{sp_client_id}"
+    db_path = f"{branch_path}/databases/{database_id}"
+
     for db in w.postgres.list_databases(parent=branch_path):
-        if db.name and db.name.endswith(f"/databases/{database_id}"):
-            logger.info("Database %s already exists", database_id)
+        if db.name == db_path:
+            # Ensure the SP owns it
+            current_owner = db.status.role if db.status else None
+            if current_owner != sp_role:
+                logger.info("Transferring database %s ownership to SP", database_id)
+                w.postgres.update_database(
+                    name=db_path,
+                    database=Database(
+                        name=db_path,
+                        spec=DatabaseDatabaseSpec(role=sp_role),
+                    ),
+                    update_mask=FieldMask(paths=["spec.role"]),
+                ).wait()
+            else:
+                logger.info("Database %s already exists with correct owner", database_id)
             return
 
-    user_email = w.current_user.me().user_name
-    owner_role = None
-    for role in w.postgres.list_roles(parent=branch_path):
-        if role.status and role.status.postgres_role == user_email:
-            owner_role = role.name
-            break
-
-    if not owner_role:
-        raise ValueError(
-            f"No Lakebase role found for {user_email} on {branch_path}. "
-            f"Ensure you have access to this project."
-        )
-
-    logger.info("Creating database %s in %s", database_id, branch_path)
+    logger.info("Creating database %s in %s (owner: SP)", database_id, branch_path)
     w.postgres.create_database(
         parent=branch_path,
         database=Database(
             spec=DatabaseDatabaseSpec(
                 postgres_database=database_id,
-                role=owner_role,
+                role=sp_role,
             ),
         ),
         database_id=database_id,
@@ -183,7 +191,7 @@ def provision_lakebase(
     # 2–4. Shared: wait for endpoint, ensure SP role, ensure database
     host = _wait_for_endpoint(w, endpoint_path)
     _ensure_sp_role(w, branch_path, sp_client_id)
-    _ensure_database(w, branch_path, database_id)
+    _ensure_database(w, branch_path, database_id, sp_client_id)
 
     return LakebaseConfig(endpoint=endpoint_path, host=host, database=database_id)
 
@@ -209,6 +217,6 @@ def resolve_lakebase(
     # Shared: get host, ensure SP role, ensure database
     host = _wait_for_endpoint(w, endpoint_path)
     _ensure_sp_role(w, branch_path, sp_client_id)
-    _ensure_database(w, branch_path, database_id)
+    _ensure_database(w, branch_path, database_id, sp_client_id)
 
     return LakebaseConfig(endpoint=endpoint_path, host=host, database=database_id)
