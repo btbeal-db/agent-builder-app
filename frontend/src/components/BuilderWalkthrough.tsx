@@ -29,14 +29,14 @@ const STEPS: Step[] = [
     icon: <GripVertical size={16} />,
     title: "Drop nodes to start",
     text: "Drag nodes from the Components palette onto the canvas. Each node automatically creates a state field it writes to — no setup needed. You can rename or customize fields in the State panel.",
-    position: "left-bottom",
+    position: "left-top",
     highlight: ".palette",
   },
   {
     icon: <Layers size={16} />,
     title: "State model",
     text: "The State panel tracks your agent's shared memory. Fields are created as you add nodes, and each node updates its field via the \"writes to\" setting. You can add or rename fields here.",
-    position: "left-top",
+    position: "left-bottom",
     highlight: ".state-panel",
   },
   {
@@ -84,7 +84,10 @@ export default function BuilderWalkthrough({ onDismiss }: Props) {
         }
       `}</style>
 
-      <div className={`walkthrough walkthrough-${current.position}`}>
+      {/* Click anywhere outside the popover to dismiss */}
+      <div className="walkthrough-backdrop" onClick={onDismiss} />
+
+      <div className={`walkthrough walkthrough-${current.position}`} onClick={(e) => e.stopPropagation()}>
         <button className="walkthrough-close" onClick={onDismiss} title="Dismiss">
           <X size={14} />
         </button>
