@@ -9,5 +9,5 @@ command:
 # DATABRICKS_WORKSPACE_ID are automatically injected by the platform.
 # The user's OBO token arrives in the x-forwarded-access-token request header.
 #
-# Setup records are stored as workspace files in each user's own directory
-# (via OBO token) — no extra permissions or SQL warehouse required.
+# Setup records are stored inside the user's experiment directory as a
+# workspace file (written by the SP which has Can Manage on the folder).

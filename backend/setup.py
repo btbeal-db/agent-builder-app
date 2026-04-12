@@ -8,16 +8,16 @@ in a workspace file (in the user's own directory) so setup only happens once.
 
 from __future__ import annotations
 
+import io
 import json
 import logging
 import os
 import time
 
 import mlflow
-import requests as http_requests
 from fastapi import APIRouter, HTTPException
 
-from .auth import get_sp_workspace_client, get_user_token, get_workspace_client
+from .auth import get_sp_workspace_client, get_workspace_client
 from .schema import (
     SetupInfoResponse,
     SetupStatusResponse,
@@ -28,61 +28,47 @@ from .schema import (
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-# Config file stored in each user's own workspace directory (via OBO token).
+# Config filename stored inside the user's experiment directory (written by SP).
 _SETUP_FILENAME = ".agent-builder-setup.json"
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 
-def _user_config_path(email: str) -> str:
-    """Return the workspace path for a user's setup config file."""
-    return f"/Users/{email}/{_SETUP_FILENAME}"
-
-
-def _workspace_files_headers() -> dict[str, str]:
-    """Return auth headers using the OBO user token."""
-    token = get_user_token()
-    if not token:
-        raise RuntimeError("No OBO token available")
-    return {"Authorization": f"Bearer {token}"}
-
-
-def _workspace_files_url(path: str) -> str:
-    """Build the Workspace Files REST URL for a given path."""
-    host = os.environ.get("DATABRICKS_HOST", "").rstrip("/")
-    if host and not host.startswith("http"):
-        host = f"https://{host}"
-    return f"{host}/api/2.0/workspace-files/{path.lstrip('/')}"
+def _config_path(experiment_path: str) -> str:
+    """Return the workspace path for the setup config inside the experiment dir."""
+    return f"{experiment_path.rstrip('/')}/{_SETUP_FILENAME}"
 
 
 def _read_user_config(email: str) -> dict | None:
-    """Read a user's setup config via the Workspace Files API (files.files scope)."""
-    url = _workspace_files_url(_user_config_path(email))
+    """Try to find a setup config in the user's default experiment directory.
+
+    Uses the SP client (which has Can Manage on the experiment folder).
+    Tries the default convention path: /Users/{email}/agent-sweet.
+    """
+    default_experiment = f"/Users/{email}/agent-sweet"
+    path = _config_path(default_experiment)
     try:
-        resp = http_requests.get(url, headers=_workspace_files_headers(), timeout=10)
-        if resp.status_code == 404:
-            return None
-        resp.raise_for_status()
-        return resp.json()
+        sp = get_sp_workspace_client()
+        resp = sp.workspace.download(path)
+        return json.loads(resp.read())
     except Exception:
         return None
 
 
-def _write_user_config(email: str, experiment_path: str) -> None:
-    """Write a user's setup config via the Workspace Files API (files.files scope)."""
-    url = _workspace_files_url(_user_config_path(email))
+def _write_user_config(experiment_path: str, email: str) -> None:
+    """Write setup config inside the experiment directory using the SP client."""
+    path = _config_path(experiment_path)
     data = {
         "user_email": email,
         "experiment_path": experiment_path,
         "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
-    resp = http_requests.put(
-        url,
-        data=json.dumps(data, indent=2).encode(),
-        headers={**_workspace_files_headers(), "Content-Type": "application/octet-stream"},
-        timeout=10,
+    sp = get_sp_workspace_client()
+    sp.workspace.upload(
+        path,
+        io.BytesIO(json.dumps(data, indent=2).encode()),
+        overwrite=True,
     )
-    resp.raise_for_status()
 
 
 def _get_user_email() -> str:
@@ -190,7 +176,7 @@ def validate_setup(req: SetupValidateRequest):
 
     # Persist the setup record as a workspace file in the user's directory
     try:
-        _write_user_config(email, req.experiment_path)
+        _write_user_config(req.experiment_path, email)
     except Exception as exc:
         logger.warning("Failed to persist setup record: %s", exc)
         return SetupValidateResponse(

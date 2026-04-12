@@ -7,8 +7,8 @@
 # The frontend must be built before deploying — the build output
 # lives in backend/static/ and is served by FastAPI at runtime.
 #
-# Setup records are stored as workspace files in each user's own directory
-# (via OBO token) — no extra permissions or SQL warehouse required.
+# Setup records are stored inside the user's experiment directory as a
+# workspace file (written by the SP which has Can Manage on the folder).
 
 bundle:
   name: agent-builder-app
@@ -35,7 +35,6 @@ resources:
         - catalog.tables:read
         - vectorsearch.vector-search-endpoints
         - vectorsearch.vector-search-indexes
-        - files.files
 
 targets:
   dev:
