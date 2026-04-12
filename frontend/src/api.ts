@@ -45,10 +45,6 @@ export async function previewGraph(
   return res.json();
 }
 
-export async function loadGraphFromRun(runId: string): Promise<{ success: boolean; graph?: GraphDef; error?: string }> {
-  const res = await fetch(`${BASE}/graph/load-from-run?run_id=${encodeURIComponent(runId)}`);
-  return res.json();
-}
 
 export interface AIChatResponse {
   message: string;

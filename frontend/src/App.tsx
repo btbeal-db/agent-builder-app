@@ -13,7 +13,7 @@ import BuilderWalkthrough from "./components/BuilderWalkthrough";
 import AIChatDropdown from "./components/AIChatDropdown";
 import SetupPage from "./components/SetupPage";
 import { StateProvider } from "./StateContext";
-import { fetchNodeTypes, loadGraphFromRun, getSetupStatus } from "./api";
+import { fetchNodeTypes, getSetupStatus } from "./api";
 import type { NodeTypeMetadata, GraphDef, StateFieldDef, SetupStatusResponse } from "./types";
 
 type AppView = "home" | "builder" | "help" | "setup";
@@ -30,17 +30,10 @@ export default function App() {
   const [showAIChat, setShowAIChat] = useState(false);
   const aiChatWrapperRef = useRef<HTMLDivElement>(null);
   const [showDeploy, setShowDeploy] = useState(false);
-  const [showRunIdPrompt, setShowRunIdPrompt] = useState(false);
-  const [runIdInput, setRunIdInput] = useState("");
-  const [runIdLoading, setRunIdLoading] = useState(false);
-  const [runIdError, setRunIdError] = useState("");
-  const [runIdResult, setRunIdResult] = useState<{
-    graph: GraphDef;
-    run_name: string;
-    experiment_id: string;
-    found_at: string;
-    searched: string[];
-  } | null>(null);
+  const [showImportJson, setShowImportJson] = useState(false);
+  const [importJsonInput, setImportJsonInput] = useState("");
+  const [importJsonError, setImportJsonError] = useState("");
+  const [importJsonPreview, setImportJsonPreview] = useState<GraphDef | null>(null);
   const [graphImporter, setGraphImporter] = useState<((g: GraphDef) => void) | null>(null);
   const [view, setView] = useState<AppView>("home");
   const [showWalkthrough, setShowWalkthrough] = useState(false);
@@ -129,38 +122,33 @@ export default function App() {
     setSelectedNodeId(null);
   }, [graphImporter]);
 
-  const handleFetchRun = useCallback(async () => {
-    if (!runIdInput.trim()) return;
-    setRunIdLoading(true);
-    setRunIdError("");
-    setRunIdResult(null);
+  const handleImportJsonParse = useCallback(() => {
+    setImportJsonError("");
+    setImportJsonPreview(null);
     try {
-      const result = await loadGraphFromRun(runIdInput.trim());
-      if (result.success && result.graph) {
-        setRunIdResult(result as unknown as NonNullable<typeof runIdResult>);
-      } else {
-        setRunIdError(result.error || "Failed to load graph.");
+      const parsed = JSON.parse(importJsonInput.trim());
+      if (!parsed.nodes || !parsed.edges) {
+        setImportJsonError("JSON must contain \"nodes\" and \"edges\" fields.");
+        return;
       }
-    } catch (err) {
-      setRunIdError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setRunIdLoading(false);
+      setImportJsonPreview(parsed as GraphDef);
+    } catch {
+      setImportJsonError("Invalid JSON.");
     }
-  }, [runIdInput]);
+  }, [importJsonInput]);
 
-  const handleAcceptRun = useCallback(() => {
-    if (!runIdResult?.graph || !graphImporter) return;
-    const graph = runIdResult.graph as GraphDef;
-    if (graph.state_fields?.length) {
-      setStateFields(graph.state_fields);
+  const handleImportJsonAccept = useCallback(() => {
+    if (!importJsonPreview || !graphImporter) return;
+    if (importJsonPreview.state_fields?.length) {
+      setStateFields(importJsonPreview.state_fields);
     }
-    graphImporter(graph);
+    graphImporter(importJsonPreview);
     hasOpenedBuilder.current = true;
-    setShowRunIdPrompt(false);
-    setRunIdInput("");
-    setRunIdResult(null);
+    setShowImportJson(false);
+    setImportJsonInput("");
+    setImportJsonPreview(null);
     setView("builder");
-  }, [graphImporter, runIdResult]);
+  }, [graphImporter, importJsonPreview]);
 
   return (
     <ReactFlowProvider>
@@ -188,9 +176,9 @@ export default function App() {
                   style={{ display: "none" }}
                   onChange={handleLoadJson}
                 />
-                <button className="btn btn-ghost btn-with-icon" onClick={() => setShowRunIdPrompt(true)} title="Load graph from an MLflow run">
+                <button className="btn btn-ghost btn-with-icon" onClick={() => setShowImportJson(true)} title="Import graph from JSON (e.g. from an MLflow run artifact)">
                   <CloudDownload size={14} />
-                  MLflow
+                  Import
                 </button>
                 <button className="btn btn-ghost btn-danger-ghost" onClick={handleClearAll}>
                   <Trash2 size={14} />
@@ -344,98 +332,85 @@ export default function App() {
         />
       )}
 
-      {/* Load from MLflow run modal */}
-      {showRunIdPrompt && (
-        <div className="modal-overlay" onClick={() => { setShowRunIdPrompt(false); setRunIdError(""); setRunIdResult(null); }}>
-          <div className="modal-card" style={{ width: runIdResult ? 600 : 440 }} onClick={(e) => e.stopPropagation()}>
+      {/* Import graph JSON modal */}
+      {showImportJson && (
+        <div className="modal-overlay" onClick={() => { setShowImportJson(false); setImportJsonError(""); setImportJsonPreview(null); setImportJsonInput(""); }}>
+          <div className="modal-card" style={{ width: importJsonPreview ? 600 : 500 }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h1>Load from MLflow Run</h1>
-              {!runIdResult && (
+              <h1>Import Graph JSON</h1>
+              {!importJsonPreview && (
                 <p>
-                  Enter the MLflow Run ID from a previously deployed graph. The
-                  graph definition is stored as an artifact during deployment.
+                  Paste the graph definition JSON below. You can copy this from
+                  an MLflow run artifact or a saved graph file.
                 </p>
               )}
             </div>
             <div className="modal-body">
-              {!runIdResult ? (
+              {!importJsonPreview ? (
                 <>
-                  <input
+                  <textarea
                     className="preview-input"
-                    style={{ width: "100%" }}
-                    value={runIdInput}
-                    placeholder="e.g. a1b2c3d4e5f6..."
-                    onChange={(e) => setRunIdInput(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && handleFetchRun()}
+                    style={{ width: "100%", minHeight: 200, fontFamily: "monospace", fontSize: "0.8rem", resize: "vertical" }}
+                    value={importJsonInput}
+                    placeholder='{"nodes": [...], "edges": [...], ...}'
+                    onChange={(e) => setImportJsonInput(e.target.value)}
                     autoFocus
                   />
-                  {runIdError && (
+                  {importJsonError && (
                     <pre className="result-error" style={{ marginTop: "0.5rem", fontSize: "0.75rem" }}>
-                      {runIdError}
+                      {importJsonError}
                     </pre>
                   )}
                 </>
               ) : (
                 <div className="mlflow-load-preview">
-                  <div className="mlflow-load-success">Graph found</div>
+                  <div className="mlflow-load-success">Valid graph definition</div>
                   <div className="mlflow-load-meta">
                     <div className="mlflow-load-row">
-                      <span className="mlflow-load-label">Run</span>
-                      <span>{runIdResult.run_name}</span>
-                    </div>
-                    <div className="mlflow-load-row">
-                      <span className="mlflow-load-label">Found at</span>
-                      <code>{runIdResult.found_at}</code>
-                    </div>
-                    <div className="mlflow-load-row">
                       <span className="mlflow-load-label">Nodes</span>
-                      <span>{runIdResult.graph.nodes?.length ?? 0}</span>
+                      <span>{importJsonPreview.nodes?.length ?? 0}</span>
                     </div>
                     <div className="mlflow-load-row">
                       <span className="mlflow-load-label">State fields</span>
-                      <span>{runIdResult.graph.state_fields?.map((f: { name: string }) => f.name).join(", ")}</span>
+                      <span>{importJsonPreview.state_fields?.map((f: { name: string }) => f.name).join(", ") || "none"}</span>
                     </div>
                   </div>
                   <details className="mlflow-load-json-details">
                     <summary>Graph JSON</summary>
                     <pre className="mlflow-load-json">
-                      {JSON.stringify(runIdResult.graph, null, 2)}
+                      {JSON.stringify(importJsonPreview, null, 2)}
                     </pre>
                   </details>
-                  <div className="mlflow-load-hint">
-                    Older graphs may reference state fields or configs that have since
-                    been renamed. You can review the JSON above and fix any issues after importing.
-                  </div>
                 </div>
               )}
             </div>
             <div className="modal-footer">
-              {!runIdResult ? (
+              {!importJsonPreview ? (
                 <>
                   <button
                     className="btn btn-ghost"
-                    onClick={() => { setShowRunIdPrompt(false); setRunIdError(""); }}
+                    onClick={() => { setShowImportJson(false); setImportJsonError(""); setImportJsonInput(""); }}
                   >
                     Cancel
                   </button>
                   <button
                     className="btn btn-primary"
-                    onClick={handleFetchRun}
-                    disabled={runIdLoading || !runIdInput.trim()}
+                    onClick={handleImportJsonParse}
+                    disabled={!importJsonInput.trim()}
                   >
-                    {runIdLoading ? "Searching..." : "Find Graph"}
+                    Parse
                   </button>
                 </>
               ) : (
                 <>
                   <button
                     className="btn btn-ghost"
-                    onClick={() => setRunIdResult(null)}
+                    onClick={() => setImportJsonPreview(null)}
                   >
                     Back
                   </button>
-                  <button className="btn btn-primary" onClick={handleAcceptRun}>
-                    Continue
+                  <button className="btn btn-primary" onClick={handleImportJsonAccept}>
+                    Import
                   </button>
                 </>
               )}
