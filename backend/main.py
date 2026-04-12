@@ -404,7 +404,9 @@ def load_graph_from_run(run_id: str):
         client = mlflow.MlflowClient(tracking_uri="databricks")
 
         logger.info(
-            "Loading graph from run %s, artifact_uri=%s", run_id, artifact_uri
+            "Loading graph from run %s, artifact_uri=%s",
+            run_id,
+            run.info.artifact_uri,
         )
 
         search_paths = [
