@@ -409,6 +409,10 @@ def load_graph_from_run(run_id: str):
         w = get_sp_workspace_client()
         client = mlflow.MlflowClient(tracking_uri="databricks")
 
+        logger.info(
+            "Loading graph from run %s, artifact_uri=%s", run_id, artifact_uri
+        )
+
         search_paths = [
             "agent/artifacts/graph_def",
             "agent/artifacts",
@@ -423,7 +427,14 @@ def load_graph_from_run(run_id: str):
                 artifacts = client.list_artifacts(
                     run_id, path=artifact_path if artifact_path else None
                 )
+                logger.info(
+                    "list_artifacts(%s, path=%r) -> %s",
+                    run_id,
+                    artifact_path or None,
+                    [(a.path, a.is_dir, a.file_size) for a in artifacts],
+                )
             except Exception:
+                logger.exception("list_artifacts failed for path=%r", artifact_path)
                 continue
 
             for artifact_info in artifacts:
@@ -444,8 +455,10 @@ def load_graph_from_run(run_id: str):
                             "found_at": artifact_path or "(root)",
                             "searched": searched,
                         }
-                except (json.JSONDecodeError, Exception):
-                    continue
+                except Exception:
+                    logger.exception(
+                        "Failed to read/parse artifact %s", artifact_info.path
+                    )
 
         return {
             "success": False,
