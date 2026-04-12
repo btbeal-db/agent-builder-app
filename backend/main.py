@@ -366,24 +366,20 @@ def preview_graph(req: PreviewRequest):
         mlflow.set_tracking_uri(prev_tracking_uri)
 
 
-def _read_artifact_via_dbfs(w, artifact_uri: str, relative_path: str) -> str:
-    """Read artifact content through the workspace DBFS API.
+def _read_artifact_via_files_api(w, experiment_id: str, run_id: str, relative_path: str) -> str:
+    """Read artifact content through the workspace Files API.
 
     ``mlflow.artifacts.download_artifacts`` follows a presigned-URL redirect to
     ``storage.cloud.databricks.com`` which is unreachable from Databricks Apps.
-    The DBFS ``read`` endpoint returns the content inline (base64-encoded) and
-    routes exclusively through the workspace host, avoiding the redirect.
+    The workspace Files API routes through the workspace host directly.
     """
-    import base64
-
-    if artifact_uri.startswith("dbfs:"):
-        base_path = artifact_uri[5:]  # strip "dbfs:" → "/databricks/mlflow-tracking/…"
-    else:
-        base_path = artifact_uri
-
-    full_path = f"{base_path}/{relative_path}"
-    resp = w.dbfs.read(full_path)
-    return base64.b64decode(resp.data).decode("utf-8")
+    file_path = (
+        f"/WorkspaceInternal/Jobs/mlflow-tracking/"
+        f"{experiment_id}/{run_id}/artifacts/{relative_path}"
+    )
+    logger.info("Downloading artifact via Files API: %s", file_path)
+    resp = w.files.download(file_path)
+    return resp.contents.read().decode("utf-8")
 
 
 @app.get("/api/graph/load-from-run")
@@ -404,8 +400,6 @@ def load_graph_from_run(run_id: str):
         run = mlflow.get_run(run_id)
         run_name = run.info.run_name or run_id
         experiment_id = run.info.experiment_id
-        artifact_uri = run.info.artifact_uri
-
         w = get_sp_workspace_client()
         client = mlflow.MlflowClient(tracking_uri="databricks")
 
@@ -441,8 +435,8 @@ def load_graph_from_run(run_id: str):
                 if artifact_info.is_dir or not artifact_info.path.endswith(".json"):
                     continue
                 try:
-                    content = _read_artifact_via_dbfs(
-                        w, artifact_uri, artifact_info.path
+                    content = _read_artifact_via_files_api(
+                        w, experiment_id, run_id, artifact_info.path
                     )
                     graph_data = json.loads(content)
                     if "nodes" in graph_data and "edges" in graph_data:
