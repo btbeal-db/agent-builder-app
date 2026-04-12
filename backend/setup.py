@@ -173,12 +173,17 @@ def validate_setup(req: SetupValidateRequest):
             ),
         )
 
-    # Persist the setup record as a workspace file
+    # Persist the setup record as a workspace file in the user's directory
     try:
         _write_user_config(email, req.experiment_path)
     except Exception as exc:
         logger.warning("Failed to persist setup record: %s", exc)
-        # Still return success — the SP can access the experiment even if
-        # we couldn't save the record (user will just need to set up again)
+        return SetupValidateResponse(
+            success=False,
+            error=(
+                f"Setup validated but could not save your config. "
+                f"The OBO token may lack the 'workspace' scope. Error: {exc}"
+            ),
+        )
 
     return SetupValidateResponse(success=True, experiment_id=experiment_id)

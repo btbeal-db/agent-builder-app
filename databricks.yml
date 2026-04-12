@@ -7,8 +7,8 @@
 # The frontend must be built before deploying — the build output
 # lives in backend/static/ and is served by FastAPI at runtime.
 #
-# Setup records are stored as workspace files under /Shared/.agent-builder/setup/
-# using the SP's workspace credentials — no SQL warehouse or Delta table required.
+# Setup records are stored as workspace files in each user's own directory
+# (via OBO token) — no extra permissions or SQL warehouse required.
 
 bundle:
   name: agent-builder-app
