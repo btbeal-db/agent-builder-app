@@ -101,6 +101,14 @@ class BaseNode(ABC):
         """Whether this node type can be attached as a tool to an LLM node."""
         return False
 
+    @property
+    def default_field_template(self) -> dict[str, str] | None:
+        """Default state field auto-created when this node is dropped on the canvas.
+
+        Return ``None`` for node types that don't write to state (e.g. routers).
+        """
+        return None
+
     # -- execution ---------------------------------------------------------
 
     @abstractmethod
@@ -127,4 +135,5 @@ class BaseNode(ABC):
             "color": self.color,
             "config_fields": [f.model_dump() for f in self.config_fields],
             "tool_compatible": self.tool_compatible,
+            "default_field_template": self.default_field_template,
         }

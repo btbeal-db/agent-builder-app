@@ -26,18 +26,18 @@ interface Step {
 
 const STEPS: Step[] = [
   {
-    icon: <Layers size={16} />,
-    title: "Define your state",
-    text: "The State Model defines your agent's shared memory. Every node reads the full state and updates a specific field via its \"writes to\" setting.",
-    position: "left-top",
-    highlight: ".state-panel",
-  },
-  {
     icon: <GripVertical size={16} />,
-    title: "Add components",
-    text: "Drag nodes from the Components palette onto the canvas. Each node performs one action — call an LLM, search documents, route logic, or ask the user a question.",
+    title: "Drop nodes to start",
+    text: "Drag nodes from the Components palette onto the canvas. Each node automatically creates a state field it writes to — no setup needed. You can rename or customize fields in the State panel.",
     position: "left-bottom",
     highlight: ".palette",
+  },
+  {
+    icon: <Layers size={16} />,
+    title: "State model",
+    text: "The State panel tracks your agent's shared memory. Fields are created as you add nodes, and each node updates its field via the \"writes to\" setting. You can add or rename fields here.",
+    position: "left-top",
+    highlight: ".state-panel",
   },
   {
     icon: <Link size={16} />,

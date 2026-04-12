@@ -35,6 +35,10 @@ class HumanInputNode(BaseNode):
         return "#f59e0b"
 
     @property
+    def default_field_template(self) -> dict[str, str] | None:
+        return {"name": "user_response", "type": "str", "description": "User's response"}
+
+    @property
     def config_fields(self) -> list[NodeConfigField]:
         return [
             NodeConfigField(

@@ -1,9 +1,10 @@
 import { Handle, Position, useReactFlow, useUpdateNodeInternals } from "@xyflow/react";
 import type { NodeProps } from "@xyflow/react";
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
-import { useStateVars } from "../../StateContext";
+import { useStateVars, useAddField, useStateFields } from "../../StateContext";
 import { NodeIcon } from "../NodeIcon";
 import ToolChip from "./ToolChip";
+import InlineFieldCreator from "../InlineFieldCreator";
 import type { AttachedTool } from "../../types";
 
 interface RouteEntry {
@@ -30,6 +31,9 @@ function routeHandleId(route: RouteEntry, index: number): string {
 export default function AgentNode({ id, data, selected }: NodeProps) {
   const { setNodes } = useReactFlow();
   const stateVarNames = useStateVars();
+  const addField = useAddField();
+  const currentFields = useStateFields();
+  const [showNewField, setShowNewField] = useState(false);
   const updateNodeInternals = useUpdateNodeInternals();
   const nodeRef = useRef<HTMLDivElement>(null);
   const rowRefs = useRef<(HTMLDivElement | null)[]>([]);
@@ -211,14 +215,37 @@ export default function AgentNode({ id, data, selected }: NodeProps) {
             <select
               className="writes-to-select"
               value={writesTo}
-              onChange={handleWritesToChange}
+              onChange={(e) => {
+                if (e.target.value === "__new__") {
+                  setShowNewField(true);
+                  return;
+                }
+                handleWritesToChange(e);
+              }}
               onClick={(e) => e.stopPropagation()}
             >
               <option value="">select field...</option>
               {stateVarNames.map((v) => (
                 <option key={v} value={v}>{v}</option>
               ))}
+              <option value="__new__">+ New field...</option>
             </select>
+            {showNewField && (
+              <InlineFieldCreator
+                existingNames={currentFields.map((f) => f.name)}
+                onAdd={(field) => {
+                  addField(field);
+                  setShowNewField(false);
+                  // Set writes_to to the new field
+                  setNodes((nds) =>
+                    nds.map((n) =>
+                      n.id === id ? { ...n, data: { ...n.data, writes_to: field.name } } : n
+                    )
+                  );
+                }}
+                onCancel={() => setShowNewField(false)}
+              />
+            )}
           </div>
         )}
 

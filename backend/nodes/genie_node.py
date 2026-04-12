@@ -91,6 +91,10 @@ class GenieNode(BaseNode):
         return True
 
     @property
+    def default_field_template(self) -> dict[str, str] | None:
+        return {"name": "genie_result", "type": "str", "description": "Genie query result"}
+
+    @property
     def config_fields(self) -> list[NodeConfigField]:
         return [
             NodeConfigField(

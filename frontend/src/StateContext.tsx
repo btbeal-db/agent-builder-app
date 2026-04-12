@@ -4,9 +4,18 @@ import type { StateFieldDef } from "./types";
 interface StateContextValue {
   names: string[];
   fields: StateFieldDef[];
+  addField: (field: StateFieldDef) => void;
+  renameField: (oldName: string, newName: string) => void;
 }
 
-const StateContext = createContext<StateContextValue>({ names: [], fields: [] });
+const noop = () => {};
+
+const StateContext = createContext<StateContextValue>({
+  names: [],
+  fields: [],
+  addField: noop,
+  renameField: noop,
+});
 
 export const StateProvider = StateContext.Provider;
 
@@ -20,4 +29,12 @@ export function useStateFields(): StateFieldDef[] {
 
 export function useStateField(name: string): StateFieldDef | undefined {
   return useContext(StateContext).fields.find((f) => f.name === name);
+}
+
+export function useAddField(): (field: StateFieldDef) => void {
+  return useContext(StateContext).addField;
+}
+
+export function useRenameField(): (oldName: string, newName: string) => void {
+  return useContext(StateContext).renameField;
 }

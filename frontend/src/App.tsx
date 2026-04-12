@@ -53,6 +53,7 @@ export default function App() {
   });
   const stateFieldsRef = useRef(stateFields);
   stateFieldsRef.current = stateFields;
+  const nodesUpdaterRef = useRef<((fn: (nodes: any[]) => any[]) => void) | null>(null);
 
   useEffect(() => {
     fetchNodeTypes().then(setNodeTypes).catch(console.error);
@@ -64,6 +65,53 @@ export default function App() {
         }
       })
       .catch(console.error);
+  }, []);
+
+  const addField = useCallback((field: StateFieldDef) => {
+    setStateFields((prev) => {
+      if (prev.some((f) => f.name === field.name)) return prev;
+      return [...prev, field];
+    });
+  }, []);
+
+  const renameField = useCallback((oldName: string, newName: string) => {
+    if (!newName || oldName === newName) return;
+    setStateFields((prev) =>
+      prev.map((f) => (f.name === oldName ? { ...f, name: newName } : f))
+    );
+    // Cascade: update all node references
+    const updater = nodesUpdaterRef.current;
+    if (updater) {
+      updater((nodes) =>
+        nodes.map((n) => {
+          let changed = false;
+          const data = { ...n.data };
+
+          if (data.writes_to === oldName) {
+            data.writes_to = newName;
+            changed = true;
+          }
+
+          if (data.config) {
+            const config = { ...data.config } as Record<string, unknown>;
+            for (const key of Object.keys(config)) {
+              if (config[key] === oldName) {
+                config[key] = newName;
+                changed = true;
+              }
+              // Replace {oldName} references in string values (e.g. system_prompt)
+              if (typeof config[key] === "string" && (config[key] as string).includes(`{${oldName}}`)) {
+                config[key] = (config[key] as string).split(`{${oldName}}`).join(`{${newName}}`);
+                changed = true;
+              }
+            }
+            if (changed) data.config = config;
+          }
+
+          return changed ? { ...n, data } : n;
+        })
+      );
+    }
   }, []);
 
   const handleSaveJson = useCallback(() => {
@@ -152,7 +200,7 @@ export default function App() {
 
   return (
     <ReactFlowProvider>
-      <StateProvider value={{ names: stateVariableNames, fields: stateFields }}>
+      <StateProvider value={{ names: stateVariableNames, fields: stateFields, addField, renameField }}>
       <div className={`app${showStateModal && view === "builder" ? " app-blurred" : ""}`}>
         <header className="header">
           <div className="header-left">
@@ -296,6 +344,7 @@ export default function App() {
               onNodeSelect={setSelectedNodeId}
               onGraphReady={(getter) => setGraphGetter(() => getter)}
               onImportReady={(importer) => setGraphImporter(() => importer)}
+              onNodesUpdaterReady={(updater) => { nodesUpdaterRef.current = updater; }}
               visible={view === "builder"}
             />
           </div>

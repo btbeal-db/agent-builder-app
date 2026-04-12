@@ -20,6 +20,7 @@ import SentinelNode from "./nodes/SentinelNode";
 import ConfigPanel from "./ConfigPanel";
 import ToolConfigPanel from "./ToolConfigPanel";
 import type { NodeTypeMetadata, GraphDef, AttachedTool } from "../types";
+import { useAddField, useStateFields } from "../StateContext";
 
 const START_ID = "__start__";
 const END_ID = "__end__";
@@ -48,6 +49,7 @@ interface Props {
   selectedNodeId: string | null;
   onGraphReady: (getter: () => GraphDef) => void;
   onImportReady?: (importer: (graph: GraphDef) => void) => void;
+  onNodesUpdaterReady?: (updater: (fn: (nodes: Node[]) => Node[]) => void) => void;
   visible?: boolean;
 }
 
@@ -84,11 +86,13 @@ function usePopoverPosition(selectedNodeId: string | null, wrapperRef: React.Ref
   return pos;
 }
 
-export default function Canvas({ nodeTypes, stateVariableNames, onNodeSelect, selectedNodeId, onGraphReady, onImportReady, visible = true }: Props) {
+export default function Canvas({ nodeTypes, stateVariableNames, onNodeSelect, selectedNodeId, onGraphReady, onImportReady, onNodesUpdaterReady, visible = true }: Props) {
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>(INITIAL_NODES);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const { screenToFlowPosition, fitView } = useReactFlow();
+  const addField = useAddField();
+  const currentFields = useStateFields();
   const [selectedTool, setSelectedTool] = useState<{ nodeId: string; toolId: string } | null>(null);
 
   // Re-fit the viewport when the canvas becomes visible (e.g. switching back from Home/Help)
@@ -251,6 +255,11 @@ export default function Canvas({ nodeTypes, stateVariableNames, onNodeSelect, se
     });
   }, [onImportReady, nodeTypes, setNodes, setEdges]);
 
+  // Expose setNodes for cascade rename from App
+  useEffect(() => {
+    if (onNodesUpdaterReady) onNodesUpdaterReady(setNodes);
+  }, [onNodesUpdaterReady, setNodes]);
+
   // Drop from palette
   const onDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -334,9 +343,20 @@ export default function Canvas({ nodeTypes, stateVariableNames, onNodeSelect, se
         }
       }
 
-      const defaultWritesTo = meta.type === "router"
-        ? ""
-        : stateVariableNames.find((v) => v !== "input") ?? "";
+      // Auto-create a state field for this node type if it has a template
+      let defaultWritesTo = "";
+      const template = meta.default_field_template;
+      if (template && meta.type !== "router") {
+        const existingNames = new Set(currentFields.map((f) => f.name));
+        let fieldName = template.name;
+        let counter = 1;
+        while (existingNames.has(fieldName)) {
+          counter++;
+          fieldName = `${template.name}_${counter}`;
+        }
+        addField({ name: fieldName, type: template.type, description: template.description, sub_fields: [] });
+        defaultWritesTo = fieldName;
+      }
 
       const newNode: Node = {
         id: `node_${++nodeIdCounter}`,
@@ -357,7 +377,7 @@ export default function Canvas({ nodeTypes, stateVariableNames, onNodeSelect, se
 
       setNodes((nds) => [...nds, newNode]);
     },
-    [nodeTypes, setNodes, findLlmNodeAtPosition, screenToFlowPosition, stateVariableNames]
+    [nodeTypes, setNodes, findLlmNodeAtPosition, screenToFlowPosition, currentFields, addField]
   );
 
   // ── Tool chip selection ──────────────────────────────────────────────────

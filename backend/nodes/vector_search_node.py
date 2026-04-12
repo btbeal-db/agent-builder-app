@@ -45,6 +45,10 @@ class VectorSearchNode(BaseNode):
         return True
 
     @property
+    def default_field_template(self) -> dict[str, str] | None:
+        return {"name": "retrieved_docs", "type": "str", "description": "Retrieved documents"}
+
+    @property
     def config_fields(self) -> list[NodeConfigField]:
         return [
             NodeConfigField(

@@ -138,6 +138,10 @@ class LLMNode(BaseNode):
         return "#8b5cf6"
 
     @property
+    def default_field_template(self) -> dict[str, str] | None:
+        return {"name": "llm_output", "type": "str", "description": "LLM response"}
+
+    @property
     def config_fields(self) -> list[NodeConfigField]:
         return [
             NodeConfigField(

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ChevronDown, ChevronRight, Plus, X, Check, Maximize2 } from "lucide-react";
 import type { StateFieldDef, StateSubField } from "../types";
+import { useRenameField } from "../StateContext";
 
 const FIELD_TYPES = [
   { value: "str", label: "Text" },
@@ -33,6 +34,7 @@ interface Props {
 }
 
 export default function StatePanel({ fields, onChange, onOpenModal }: Props) {
+  const cascadeRename = useRenameField();
   const [collapsed, setCollapsed] = useState(false);
   const [expandedField, setExpandedField] = useState<number | null>(null);
   const [adding, setAdding] = useState(false);
@@ -67,8 +69,14 @@ export default function StatePanel({ fields, onChange, onOpenModal }: Props) {
   };
 
   const commitName = (index: number) => {
-    if (editingName !== null) {
-      updateField(index, { name: editingName });
+    if (editingName !== null && editingName !== fields[index].name) {
+      const oldName = fields[index].name;
+      const sanitized = editingName.trim().toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "");
+      if (sanitized && !fields.some((f) => f.name === sanitized && f.name !== oldName)) {
+        cascadeRename(oldName, sanitized);
+      }
+      setEditingName(null);
+    } else {
       setEditingName(null);
     }
   };

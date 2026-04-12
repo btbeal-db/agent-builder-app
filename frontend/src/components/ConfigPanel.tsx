@@ -1,9 +1,10 @@
-import { useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useReactFlow, useNodes } from "@xyflow/react";
 import type { NodeTypeMetadata } from "../types";
-import { useStateFields } from "../StateContext";
+import { useStateFields, useAddField } from "../StateContext";
 import RouteEditor, { type Route } from "./RouteEditor";
 import SchemaEditor, { type SchemaField } from "./SchemaEditor";
+import InlineFieldCreator from "./InlineFieldCreator";
 
 interface Props {
   selectedNodeId: string;
@@ -16,6 +17,8 @@ const DEFAULT_ROUTE: Route = { label: "default", match_value: "" };
 export default function ConfigPanel({ selectedNodeId, nodeTypes, stateVariables }: Props) {
   const { setNodes, setEdges } = useReactFlow();
   const stateFields = useStateFields();
+  const addField = useAddField();
+  const [newFieldFor, setNewFieldFor] = useState<string | null>(null);
   const nodes = useNodes();
 
   const node = useMemo(() => nodes.find((n) => n.id === selectedNodeId), [nodes, selectedNodeId]);
@@ -93,9 +96,12 @@ export default function ConfigPanel({ selectedNodeId, nodeTypes, stateVariables 
               <select
                 value={val}
                 onChange={(e) => {
+                  if (e.target.value === "__new__") {
+                    setNewFieldFor(field.name);
+                    return;
+                  }
                   updateConfig(field.name, e.target.value);
                   if (isRouter) {
-                    // Reset sub-field, routes, and edges when switching fields
                     updateConfig("_route_sub_field", "");
                     updateConfig("routes_json", [DEFAULT_ROUTE]);
                     clearRouterEdges();
@@ -106,7 +112,19 @@ export default function ConfigPanel({ selectedNodeId, nodeTypes, stateVariables 
                 {stateVariables.map((v) => (
                   <option key={v} value={v}>{v}</option>
                 ))}
+                <option value="__new__">+ New field...</option>
               </select>
+              {newFieldFor === field.name && (
+                <InlineFieldCreator
+                  existingNames={stateFields.map((f) => f.name)}
+                  onAdd={(newField) => {
+                    addField(newField);
+                    setNewFieldFor(null);
+                    updateConfig(field.name, newField.name);
+                  }}
+                  onCancel={() => setNewFieldFor(null)}
+                />
+              )}
               {field.help_text && (
                 <span className="config-hint">{field.help_text}</span>
               )}

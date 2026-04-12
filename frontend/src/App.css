@@ -3496,3 +3496,67 @@ h4.md-header { font-size: 0.82em; }
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
 }
+
+/* ── Inline Field Creator ─────────────────────────────────────── */
+
+.inline-field-creator {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex-wrap: wrap;
+  padding: 0.35rem 0;
+}
+
+.inline-field-input {
+  flex: 1;
+  min-width: 80px;
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  color: var(--text);
+  padding: 0.2rem 0.35rem;
+  font-size: 0.72rem;
+  font-family: "JetBrains Mono", monospace;
+}
+.inline-field-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.inline-field-type {
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  color: var(--text);
+  padding: 0.2rem 0.3rem;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+.inline-field-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0;
+}
+.inline-field-btn:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--accent);
+}
+.inline-field-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.inline-field-error {
+  font-size: 0.65rem;
+  color: var(--error);
+  width: 100%;
+}
