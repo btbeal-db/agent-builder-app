@@ -50,6 +50,8 @@ def _workspace_files_headers() -> dict[str, str]:
 def _workspace_files_url(path: str) -> str:
     """Build the Workspace Files REST URL for a given path."""
     host = os.environ.get("DATABRICKS_HOST", "").rstrip("/")
+    if host and not host.startswith("http"):
+        host = f"https://{host}"
     return f"{host}/api/2.0/workspace-files/{path.lstrip('/')}"
 
 
