@@ -54,7 +54,7 @@ def get_sp_workspace_client() -> WorkspaceClient:
     Unlike :func:`get_workspace_client`, this always uses the SP env vars
     regardless of whether an OBO token is available.  Use this for operations
     that must run as the application identity (e.g. MLflow experiment access,
-    config table reads/writes).
+    setup config persistence, loading graphs from MLflow runs).
     """
     host = os.environ.get("DATABRICKS_HOST", "")
     client_id = os.environ.get("DATABRICKS_CLIENT_ID", "")

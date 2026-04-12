@@ -23,7 +23,7 @@ In your Databricks workspace, create a folder under your user directory (e.g. `/
 
 ### Step 2: Grant the app access
 
-The Setup page will show the app's service principal name. Grant it **Can Manage** on your folder — the app will try to do this automatically, or show you manual instructions.
+The Setup page will show the app's service principal name and ID. In your workspace, right-click the folder you created, go to **Permissions**, search for the service principal, and grant it **Can Manage**.
 
 ### Step 3: Validate
 

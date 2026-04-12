@@ -3,7 +3,7 @@
 Each user creates a workspace directory for their MLflow experiments, then
 grants the app's service principal "Can Manage" on it.  This module provides
 the API endpoints that walk the user through that flow and persist the result
-in a workspace file (in the user's own directory) so setup only happens once.
+in a workspace file inside the experiment directory so setup only happens once.
 """
 
 from __future__ import annotations
@@ -186,8 +186,8 @@ def validate_setup(req: SetupValidateRequest):
         return SetupValidateResponse(
             success=False,
             error=(
-                f"Setup validated but could not save your config. "
-                f"The OBO token may lack the 'workspace' scope. Error: {exc}"
+                f"Setup validated but could not save your config to "
+                f"'{req.experiment_path}'. Error: {exc}"
             ),
         )
 

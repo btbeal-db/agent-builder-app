@@ -12,7 +12,7 @@ set -euo pipefail
 #   1. Builds frontend → backend/static/
 #   2. bundle deploy   → syncs files + app config
 #   3. apps deploy     → tells the running app to pick up new code (no compute restart)
-#   4. Setup records are stored as workspace files — no SQL warehouse needed
+#   4. Setup records are stored as workspace files in each user's experiment dir
 
 # ── Prerequisites ────────────────────────────────────────────────────────────
 command -v databricks >/dev/null 2>&1 || { echo "ERROR: 'databricks' CLI not found. See: https://docs.databricks.com/dev-tools/cli/install.html"; exit 1; }

@@ -88,7 +88,7 @@ This is important to understand before contributing. The app uses three credenti
 
 Each request from a logged-in user includes their downscoped OAuth token via the `x-forwarded-access-token` header. `OBOMiddleware` in `main.py` stores it in a contextvar. `get_workspace_client()` in `auth.py` creates a user-scoped `WorkspaceClient` from it.
 
-**Used for:** Playground/preview (Vector Search, Genie, UC Functions), catalog/schema read validation, setup permission grants.
+**Used for:** Playground/preview (Vector Search, Genie, UC Functions), catalog/schema read validation, user identity resolution (setup status check).
 
 **Important:** The Databricks SDK rejects requests when it sees both a token and OAuth client credentials. `get_workspace_client()` temporarily masks `DATABRICKS_CLIENT_ID`/`SECRET` from the env when creating an OBO client. Do NOT pass `auth_type` to `WorkspaceClient` — let the SDK auto-detect.
 
@@ -96,7 +96,7 @@ Each request from a logged-in user includes their downscoped OAuth token via the
 
 The app's SP credentials are injected by the platform via env vars (`DATABRICKS_HOST`, `DATABRICKS_CLIENT_ID`, `DATABRICKS_CLIENT_SECRET`). Use `get_sp_workspace_client()` from `auth.py`.
 
-**Used for:** LLM calls (Foundation Model API doesn't accept OBO), MLflow experiment logging (`set_experiment`, `log_model`), setup config table reads/writes, loading graphs from MLflow runs.
+**Used for:** LLM calls (Foundation Model API doesn't accept OBO), MLflow experiment logging (`set_experiment`, `log_model`), setup config persistence (workspace file in experiment dir), loading graphs from MLflow runs.
 
 **Why SP for MLflow?** There is no `mlflow` or `ml.experiments` OBO scope available for Databricks Apps. The SP is granted access to each user's experiment folder during the setup flow.
 
@@ -118,8 +118,7 @@ Users provide their PAT at deploy time for operations that need UC write access.
 | LLM calls (FMAPI) | SP | FMAPI doesn't accept OBO |
 | MLflow experiment logging | SP | No `ml.experiments` OBO scope |
 | Load graph from MLflow run | SP | Same as above; scoped by setup grants |
-| Setup config table | SP | App-owned Delta table |
-| Setup folder permission grant | OBO | User owns their workspace folder |
+| Setup config persistence | SP | Workspace file in experiment dir (SP has Can Manage) |
 | Register model in UC | PAT | No UC write OBO scopes |
 | Create serving endpoint | PAT | `model-serving` OBO scope unreliable |
 
