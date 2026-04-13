@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { ReactFlowProvider } from "@xyflow/react";
-import { Home, Hammer, HelpCircle, Trash2, CloudDownload, Save, Upload, MessageSquare, Rocket, Sparkles, Settings } from "lucide-react";
+import { Home, Hammer, HelpCircle, Trash2, CloudDownload, Save, Upload, MessageSquare, Rocket, Sparkles, Settings, Key } from "lucide-react";
 import Canvas from "./components/Canvas";
 import NodePalette from "./components/NodePalette";
 import StateModelModal from "./components/StateModelModal";
@@ -41,6 +41,8 @@ export default function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [setupStatus, setSetupStatus] = useState<SetupStatusResponse | null>(null);
   const [experimentPath, setExperimentPath] = useState<string | null>(null);
+  const [pat, setPat] = useState("");
+  const [showPatInput, setShowPatInput] = useState(false);
 
   const stateVariableNames = stateFields.flatMap((f) => {
     const paths = [f.name];
@@ -271,6 +273,36 @@ export default function App() {
           )}
         </header>
 
+        {view === "builder" && (
+          <div className="pat-banner">
+            <button className="pat-banner-toggle" onClick={() => setShowPatInput(!showPatInput)}>
+              <Key size={13} />
+              {pat ? "PAT Connected" : "Connect PAT"}
+              <span className={`pat-banner-dot ${pat ? "pat-banner-dot-on" : ""}`} />
+            </button>
+            {showPatInput && (
+              <>
+                <input
+                  type="password"
+                  className="pat-banner-input"
+                  value={pat}
+                  placeholder="dapi..."
+                  onChange={(e) => setPat(e.target.value)}
+                  autoComplete="off"
+                  data-1p-ignore
+                  data-lpignore="true"
+                />
+                {pat && <button className="btn btn-sm" onClick={() => setPat("")}>Clear</button>}
+              </>
+            )}
+            {!pat && showPatInput && (
+              <span className="pat-banner-hint">
+                Enables Vector Search &amp; Genie in the playground. Held in memory only.
+              </span>
+            )}
+          </div>
+        )}
+
         <div className="main">
           <nav className="nav-rail" onKeyDown={(e) => e.stopPropagation()}>
             <button
@@ -368,6 +400,7 @@ export default function App() {
           graphGetter={graphGetter}
           stateFieldsRef={stateFieldsRef}
           onClose={() => setShowChat(false)}
+          pat={pat}
         />
       )}
 
@@ -378,6 +411,7 @@ export default function App() {
           onClose={() => setShowDeploy(false)}
           defaultExperimentPath={experimentPath ?? ""}
           onGoToSetup={() => { setShowDeploy(false); setView("setup"); }}
+          defaultPat={pat}
         />
       )}
 

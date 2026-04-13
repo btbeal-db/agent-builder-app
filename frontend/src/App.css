@@ -111,6 +111,62 @@ code, pre, .mono {
   margin: 0 0.25rem;
 }
 
+/* ── PAT banner ──────────────────────────────────────────────── */
+.pat-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 1rem;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
+  font-size: 0.78rem;
+  flex-wrap: wrap;
+}
+
+.pat-banner-toggle {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-family: inherit;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.pat-banner-toggle:hover { color: var(--text); }
+
+.pat-banner-dot {
+  display: inline-block;
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  opacity: 0.35;
+}
+.pat-banner-dot-on { background: #22c55e; opacity: 1; }
+
+.pat-banner-input {
+  width: 220px;
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  padding: 0.2rem 0.5rem;
+  font-size: 0.78rem;
+  font-family: inherit;
+}
+.pat-banner-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: var(--ring);
+}
+
+.pat-banner-hint {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+}
+
 .main {
   display: flex;
   flex: 1;

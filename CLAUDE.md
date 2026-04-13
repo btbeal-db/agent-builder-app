@@ -82,10 +82,10 @@ User provides at deploy time. Never stored, used only for the duration of the re
 
 | Operation | Credential | Why |
 |---|---|---|
-| Preview / Playground | OBO | User sees only their data |
+| Preview / Playground | PAT > OBO | PAT preferred (full perms); OBO fallback for SQL/Genie |
+| Vector Search | PAT | No OBO `vector-search` scope exists |
+| Genie | PAT > OBO | PAT preferred; OBO works via `dashboards.genie` scope |
 | LLM inference (ChatDatabricks) | SP | FMAPI rejects OBO |
-| Vector Search | SP (OBO gate) | No OBO vector-search scope; indexes auto-granted as app resources, OBO check per-request |
-| Genie | SP (OBO gate) | Same pattern as VS; rooms auto-granted as app resources |
 | MLflow experiment logging | SP | No OBO scope for MLflow |
 | Setup config persistence | SP | Workspace file write |
 | UC model registration | PAT | No UC write OBO scopes |

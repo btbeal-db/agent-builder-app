@@ -41,16 +41,13 @@ def get_data_client() -> WorkspaceClient:
 
     Credential priority:
     1. **User PAT** — full permissions, no scope gaps. Preferred when available.
-    2. **SP** — fallback. Requires the resource to be registered as an app
-       resource (see :mod:`app_resources`).
-
-    OBO tokens are not used here because the required scopes
-    (``vector-search``, ``unity-catalog``) are not available.
+    2. **OBO token** — works for APIs with available scopes (SQL, Genie).
+       Will fail for Vector Search (no ``vector-search`` OBO scope).
     """
     pat = _user_pat.get()
     if pat:
         return create_pat_client(pat)
-    return get_sp_workspace_client()
+    return get_workspace_client()
 
 
 def get_workspace_client() -> WorkspaceClient:

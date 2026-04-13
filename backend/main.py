@@ -44,7 +44,6 @@ from .auth import (
     get_sp_workspace_client,
     create_pat_client,
 )
-from .app_resources import ensure_app_resources
 from .ai_chat import AIChatRequest, AIChatResponse, handle_ai_chat
 from .graph_builder import build_graph, filter_output, run_graph
 from .nodes import get_all_metadata
@@ -373,10 +372,6 @@ def preview_graph(req: PreviewRequest):
     # nodes (VS, Genie) use it instead of SP credentials.  The PAT is held
     # only in a ContextVar for the request lifetime — never stored or logged.
     set_user_pat(req.pat)
-
-    # If no PAT, ensure the SP has access to VS indexes and Genie rooms.
-    if not req.pat:
-        ensure_app_resources(req.graph)
 
     # Enable MLflow tracing — swap to the preview tracking DB for this request.
     prev_tracking_uri = mlflow.get_tracking_uri()

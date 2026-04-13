@@ -7,6 +7,7 @@ interface Props {
   graphGetter: (() => GraphDef) | null;
   stateFieldsRef: React.RefObject<StateFieldDef[]>;
   onClose: () => void;
+  pat?: string;
 }
 
 let msgId = 0;
@@ -58,14 +59,12 @@ function preflight(graphGetter: (() => GraphDef) | null, stateFields: StateField
   return null;
 }
 
-export default function ChatPlayground({ graphGetter, stateFieldsRef, onClose }: Props) {
+export default function ChatPlayground({ graphGetter, stateFieldsRef, onClose, pat }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [threadId, setThreadId] = useState<string | null>(null);
   const [pendingInterrupt, setPendingInterrupt] = useState(false);
-  const [pat, setPat] = useState("");
-  const [showPat, setShowPat] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -149,7 +148,7 @@ export default function ChatPlayground({ graphGetter, stateFieldsRef, onClose }:
       }
 
       // Branch: resume from interrupt vs. normal invocation
-      const activePat = pat.trim() || null;
+      const activePat = pat?.trim() || null;
       const result = pendingInterrupt
         ? await previewGraph(graph, "", threadId, userInput, activePat)
         : await previewGraph(graph, userInput, threadId, null, activePat);
@@ -185,7 +184,7 @@ export default function ChatPlayground({ graphGetter, stateFieldsRef, onClose }:
     } finally {
       setIsLoading(false);
     }
-  }, [input, graphGetter, stateFieldsRef, isLoading, addErrorMessage, threadId, pendingInterrupt]);
+  }, [input, graphGetter, stateFieldsRef, isLoading, addErrorMessage, threadId, pendingInterrupt, pat]);
 
   return (
     <div className="chat-overlay" onClick={onClose}>
@@ -200,41 +199,6 @@ export default function ChatPlayground({ graphGetter, stateFieldsRef, onClose }:
               &times;
             </button>
           </div>
-        </div>
-
-        <div className="chat-pat-bar">
-          <button
-            className="chat-pat-toggle"
-            onClick={() => setShowPat(!showPat)}
-          >
-            {pat ? "Connected" : "Connect PAT"}
-            <span className={`chat-pat-dot ${pat ? "chat-pat-dot-on" : ""}`} />
-          </button>
-          {showPat && (
-            <div className="chat-pat-input-row">
-              <input
-                type="password"
-                value={pat}
-                placeholder="dapi..."
-                onChange={(e) => setPat(e.target.value)}
-                className="chat-pat-input"
-                autoComplete="off"
-                data-1p-ignore
-                data-lpignore="true"
-              />
-              {pat && (
-                <button className="btn btn-sm" onClick={() => setPat("")}>
-                  Clear
-                </button>
-              )}
-            </div>
-          )}
-          {!pat && showPat && (
-            <div className="chat-pat-hint">
-              Optional. Enables Vector Search and Genie in the playground.
-              Your token is held in memory only and never stored.
-            </div>
-          )}
         </div>
 
         <div className="chat-messages">

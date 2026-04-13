@@ -12,7 +12,7 @@ from typing import Any
 
 from databricks.sdk.service.dashboards import MessageStatus
 
-from .auth import get_workspace_client, get_data_client
+from .auth import get_data_client
 from databricks.sdk.service.vectorsearch import RerankerConfig, RerankerConfigRerankerParameters
 from databricks_langchain import UCFunctionToolkit
 from langchain_core.tools import BaseTool, tool

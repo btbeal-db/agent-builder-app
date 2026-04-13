@@ -8,6 +8,7 @@ interface Props {
   onClose: () => void;
   defaultExperimentPath?: string;
   onGoToSetup?: () => void;
+  defaultPat?: string;
 }
 
 type Phase = "form" | "deploying" | "done" | "error";
@@ -95,7 +96,7 @@ function StepIcon({ status }: { status: DeployStepStatus }) {
   }
 }
 
-export default function DeployModal({ graphGetter, stateFieldsRef, onClose, defaultExperimentPath, onGoToSetup }: Props) {
+export default function DeployModal({ graphGetter, stateFieldsRef, onClose, defaultExperimentPath, onGoToSetup, defaultPat }: Props) {
   const [modelName, setModelName] = useState("");
   const [experimentName, setExperimentName] = useState("");
   // The full experiment path: base folder from setup + user-provided experiment name.
@@ -103,7 +104,7 @@ export default function DeployModal({ graphGetter, stateFieldsRef, onClose, defa
   const experimentPath = defaultExperimentPath
     ? (experimentName ? `${defaultExperimentPath.replace(/\/+$/, "")}/${experimentName}` : "")
     : experimentName;
-  const [pat, setPat] = useState("");
+  const [pat, setPat] = useState(defaultPat ?? "");
   const [deployMode, setDeployMode] = useState<DeployMode>("full");
   const [phase, setPhase] = useState<Phase>("form");
   const [steps, setSteps] = useState<Record<string, StepState>>({});
