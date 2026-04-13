@@ -43,6 +43,7 @@ from .auth import (
     get_sp_workspace_client,
     create_pat_client,
 )
+from .app_resources import ensure_app_resources
 from .ai_chat import AIChatRequest, AIChatResponse, handle_ai_chat
 from .graph_builder import build_graph, filter_output, run_graph
 from .nodes import get_all_metadata
@@ -84,90 +85,6 @@ def _serialize_messages(messages: list) -> list[dict]:
                 entry["node"] = node
             result.append(entry)
     return result
-
-
-# ── Dynamic app resource granting ────────────────────────────────────────────
-# The OBO vector-search scope is not available in Databricks Apps, so VS
-# queries use SP credentials.  This set tracks which VS indexes have already
-# been registered as app resources (granting the SP SELECT) so we only call
-# the Apps API when a new index appears.
-_granted_vs_indexes: set[str] = set()
-
-
-def _ensure_vs_resources(graph: GraphDef) -> None:
-    """Grant the app's SP SELECT access to any VS indexes used in the graph.
-
-    Databricks Apps expose a ``resources`` mechanism that auto-grants the SP
-    specific UC permissions.  We register each VS index as a ``uc_securable``
-    resource with SELECT so the SP can query it on the user's behalf.
-    """
-    from databricks.sdk.service.apps import (
-        App,
-        AppResource,
-        AppResourceUcSecurable,
-        AppResourceUcSecurableUcSecurablePermission,
-        AppResourceUcSecurableUcSecurableType,
-    )
-
-    app_name = os.environ.get("DATABRICKS_APP_NAME")
-    if not app_name:
-        return  # local dev — no app to patch
-
-    # Collect VS index names from node configs and LLM tool configs
-    needed: set[str] = set()
-    for node in graph.nodes:
-        if node.type == "vector_search":
-            idx = node.config.get("index_name", "")
-            if idx:
-                needed.add(idx)
-        tools_json = node.config.get("tools_json", "")
-        if tools_json and str(tools_json).strip():
-            try:
-                for t in json.loads(str(tools_json)):
-                    if t.get("type") == "vector_search":
-                        idx = t.get("config", {}).get("index_name", "")
-                        if idx:
-                            needed.add(idx)
-            except (json.JSONDecodeError, TypeError):
-                pass
-
-    if not needed or needed <= _granted_vs_indexes:
-        return
-
-    try:
-        sp = get_sp_workspace_client()
-        current_app = sp.apps.get(app_name)
-        current_resources = list(current_app.resources or [])
-
-        # Index names already registered as resources
-        existing = {
-            r.uc_securable.securable_full_name
-            for r in current_resources
-            if r.uc_securable and r.uc_securable.securable_full_name
-        }
-
-        missing = needed - existing - _granted_vs_indexes
-        if not missing:
-            _granted_vs_indexes.update(needed)
-            return
-
-        for idx in missing:
-            current_resources.append(
-                AppResource(
-                    name=f"vs-{idx.replace('.', '-')}",
-                    uc_securable=AppResourceUcSecurable(
-                        securable_full_name=idx,
-                        securable_type=AppResourceUcSecurableUcSecurableType.TABLE,
-                        permission=AppResourceUcSecurableUcSecurablePermission.SELECT,
-                    ),
-                )
-            )
-
-        sp.apps.update(app_name, App(name=app_name, resources=current_resources))
-        _granted_vs_indexes.update(needed)
-        logger.info("Granted SP access to VS indexes: %s", missing)
-    except Exception as exc:
-        logger.warning("Failed to auto-grant VS index access: %s", exc)
 
 
 def _extract_resources(graph: GraphDef) -> list:
@@ -285,6 +202,39 @@ def list_nodes():
     return get_all_metadata()
 
 
+@app.get("/api/test-vs")
+def test_vector_search(index_name: str, query: str = "test"):
+    """Bare-bones OBO Vector Search test — no graph, no tools, just the SDK call."""
+    from .auth import get_user_token
+    token = get_user_token()
+    host = os.environ.get("DATABRICKS_HOST", "")
+
+    if not token:
+        return {"error": "No OBO token (x-forwarded-access-token header missing)"}
+
+    # Minimal OBO client — same pattern as the official Databricks app templates
+    from databricks.sdk import WorkspaceClient
+    masked = {}
+    for key in ("DATABRICKS_CLIENT_ID", "DATABRICKS_CLIENT_SECRET"):
+        if key in os.environ:
+            masked[key] = os.environ.pop(key)
+    try:
+        w = WorkspaceClient(host=host, token=token, auth_type="pat")
+    finally:
+        os.environ.update(masked)
+
+    try:
+        resp = w.vector_search_indexes.query_index(
+            index_name=index_name,
+            columns=[],  # server will return defaults
+            query_text=query,
+            num_results=1,
+        )
+        return {"success": True, "result": resp.as_dict()}
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+
 @app.post("/api/ai-chat", response_model=AIChatResponse)
 def ai_chat(req: AIChatRequest) -> AIChatResponse:
     """Generate or modify a graph definition from natural language."""
@@ -376,9 +326,9 @@ def preview_graph(req: PreviewRequest):
     if thread_id not in _preview_sessions:
         _preview_sessions[thread_id] = InMemorySaver()
 
-    # Ensure the SP has access to any VS indexes in the graph.  Must happen
-    # before run_graph() because VS nodes use SP credentials.
-    _ensure_vs_resources(req.graph)
+    # Ensure the SP has access to VS indexes and Genie rooms in the graph.
+    # Must happen before run_graph() because these nodes use SP credentials.
+    ensure_app_resources(req.graph)
 
     # Enable MLflow tracing — swap to the preview tracking DB for this request.
     prev_tracking_uri = mlflow.get_tracking_uri()
