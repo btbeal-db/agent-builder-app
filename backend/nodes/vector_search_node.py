@@ -6,7 +6,7 @@ from typing import Any
 
 from databricks.sdk.service.vectorsearch import RerankerConfig, RerankerConfigRerankerParameters
 
-from ..auth import get_workspace_client
+from ..auth import get_sp_workspace_client
 
 from .base import BaseNode, NodeConfigField, resolve_state
 from . import register
@@ -177,7 +177,7 @@ class VectorSearchNode(BaseNode):
                     parameters=RerankerConfigRerankerParameters(columns_to_rerank=rerank_cols),
                 )
         try:
-            w = get_workspace_client()
+            w = get_sp_workspace_client()
             response = w.vector_search_indexes.query_index(
                 index_name=index_name,
                 columns=columns,
@@ -188,11 +188,9 @@ class VectorSearchNode(BaseNode):
                 reranker=reranker,
             )
         except Exception as exc:
-            from ..auth import get_user_token
-            has_obo = get_user_token() is not None
             logger.exception(
-                "Vector Search query failed (OBO=%s, index=%s)",
-                has_obo, index_name,
+                "Vector Search query failed (index=%s)",
+                index_name,
             )
             return {
                 writes_to: f"Vector Search error: {exc}",

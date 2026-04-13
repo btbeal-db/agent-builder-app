@@ -84,6 +84,7 @@ User provides at deploy time. Never stored, used only for the duration of the re
 |---|---|---|
 | Preview / Playground | OBO | User sees only their data |
 | LLM inference (ChatDatabricks) | SP | FMAPI rejects OBO |
+| Vector Search | SP | No OBO vector-search scope; indexes auto-granted as app resources |
 | MLflow experiment logging | SP | No OBO scope for MLflow |
 | Setup config persistence | SP | Workspace file write |
 | UC model registration | PAT | No UC write OBO scopes |

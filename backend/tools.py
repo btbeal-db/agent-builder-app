@@ -12,7 +12,7 @@ from typing import Any
 
 from databricks.sdk.service.dashboards import MessageStatus
 
-from .auth import get_workspace_client
+from .auth import get_workspace_client, get_sp_workspace_client
 from databricks.sdk.service.vectorsearch import RerankerConfig, RerankerConfigRerankerParameters
 from databricks_langchain import UCFunctionToolkit
 from langchain_core.tools import BaseTool, tool
@@ -61,7 +61,7 @@ def _make_vector_search_tool(config: dict[str, Any]) -> BaseTool:
             except json.JSONDecodeError:
                 pass
 
-        w = get_workspace_client()
+        w = get_sp_workspace_client()
         response = w.vector_search_indexes.query_index(
             index_name=index_name,
             columns=columns,
