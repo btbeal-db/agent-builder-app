@@ -204,34 +204,47 @@ def list_nodes():
 
 @app.get("/api/test-vs")
 def test_vector_search(index_name: str, request: FastAPIRequest, query: str = "test"):
-    """Bare-bones OBO Vector Search test — no graph, no tools, just the SDK call."""
+    """Try every combination of auth_type and env masking for OBO Vector Search."""
+    from databricks.sdk import WorkspaceClient
+
     token = request.headers.get("x-forwarded-access-token")
     host = os.environ.get("DATABRICKS_HOST", "")
 
     if not token:
         return {"error": "No OBO token (x-forwarded-access-token header missing)"}
 
-    # Minimal OBO client — same pattern as the official Databricks app templates
-    from databricks.sdk import WorkspaceClient
-    masked = {}
-    for key in ("DATABRICKS_CLIENT_ID", "DATABRICKS_CLIENT_SECRET"):
-        if key in os.environ:
-            masked[key] = os.environ.pop(key)
-    try:
-        w = WorkspaceClient(host=host, token=token, auth_type="pat")
-    finally:
-        os.environ.update(masked)
+    def _try_query(label: str, auth_type: str | None, mask: bool) -> dict:
+        masked = {}
+        if mask:
+            for key in ("DATABRICKS_CLIENT_ID", "DATABRICKS_CLIENT_SECRET"):
+                if key in os.environ:
+                    masked[key] = os.environ.pop(key)
+        try:
+            kwargs = {"host": host, "token": token}
+            if auth_type:
+                kwargs["auth_type"] = auth_type
+            w = WorkspaceClient(**kwargs)
+            resp = w.vector_search_indexes.query_index(
+                index_name=index_name,
+                columns=[],
+                query_text=query,
+                num_results=1,
+            )
+            return {"label": label, "success": True, "num_results": len(resp.as_dict().get("result", {}).get("data_array", []))}
+        except Exception as exc:
+            return {"label": label, "success": False, "error": str(exc)}
+        finally:
+            os.environ.update(masked)
 
-    try:
-        resp = w.vector_search_indexes.query_index(
-            index_name=index_name,
-            columns=[],  # server will return defaults
-            query_text=query,
-            num_results=1,
-        )
-        return {"success": True, "result": resp.as_dict()}
-    except Exception as exc:
-        return {"success": False, "error": str(exc)}
+    return {
+        "token_length": len(token),
+        "results": [
+            _try_query("auth_type=pat, masked=yes",    auth_type="pat",  mask=True),
+            _try_query("auth_type=pat, masked=no",     auth_type="pat",  mask=False),
+            _try_query("auth_type=None, masked=yes",   auth_type=None,   mask=True),
+            _try_query("auth_type=None, masked=no",    auth_type=None,   mask=False),
+        ],
+    }
 
 
 @app.post("/api/ai-chat", response_model=AIChatResponse)
