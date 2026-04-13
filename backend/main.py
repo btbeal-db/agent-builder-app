@@ -447,7 +447,8 @@ def preview_graph(req: PreviewRequest):
         logger.exception("Preview failed")
         return PreviewResponse(success=False, error=str(e))
     finally:
-        # Restore previous tracking URI so deploy still points at Databricks
+        # Clear PAT from memory and restore previous tracking URI
+        set_user_pat(None)
         mlflow.set_tracking_uri(prev_tracking_uri)
 
 

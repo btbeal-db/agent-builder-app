@@ -31,16 +31,19 @@ export async function previewGraph(
   inputMessage: string,
   threadId?: string | null,
   resumeValue?: string | null,
+  pat?: string | null,
 ): Promise<PreviewResponse> {
+  const body: Record<string, unknown> = {
+    graph,
+    input_message: inputMessage,
+    thread_id: threadId ?? null,
+    resume_value: resumeValue ?? null,
+  };
+  if (pat) body.pat = pat;
   const res = await fetch(`${BASE}/graph/preview`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      graph,
-      input_message: inputMessage,
-      thread_id: threadId ?? null,
-      resume_value: resumeValue ?? null,
-    }),
+    body: JSON.stringify(body),
   });
   return res.json();
 }
