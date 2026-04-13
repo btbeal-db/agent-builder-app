@@ -23,7 +23,7 @@ from databricks.sdk.service.serving import (
 )
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.errors import GraphInterrupt
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request as FastAPIRequest
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -203,10 +203,9 @@ def list_nodes():
 
 
 @app.get("/api/test-vs")
-def test_vector_search(index_name: str, query: str = "test"):
+def test_vector_search(index_name: str, request: FastAPIRequest, query: str = "test"):
     """Bare-bones OBO Vector Search test — no graph, no tools, just the SDK call."""
-    from .auth import get_user_token
-    token = get_user_token()
+    token = request.headers.get("x-forwarded-access-token")
     host = os.environ.get("DATABRICKS_HOST", "")
 
     if not token:
