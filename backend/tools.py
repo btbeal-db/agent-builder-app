@@ -170,9 +170,14 @@ def _make_genie_tool(config: dict[str, Any]) -> BaseTool:
 
 def _make_uc_function_tools(config: dict[str, Any]) -> list[BaseTool]:
     """Create tool(s) from a Unity Catalog function."""
+    from databricks_langchain.uc_ai import DatabricksFunctionClient
+
     function_name = config.get("function_name", "")
     custom_desc = config.get("tool_description", "")
-    toolkit = UCFunctionToolkit(function_names=[function_name])
+    # Pass the data client so UC functions use OBO auth when configured
+    w = get_data_client()
+    client = DatabricksFunctionClient(client=w)
+    toolkit = UCFunctionToolkit(function_names=[function_name], client=client)
     tools = toolkit.tools
     if custom_desc and tools:
         tools[0].description = custom_desc

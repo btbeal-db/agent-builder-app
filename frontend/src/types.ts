@@ -93,6 +93,7 @@ export interface ExportResponse {
 }
 
 export type DeployMode = "log_only" | "log_and_register" | "full";
+export type AuthMode = "obo" | "passthrough";
 
 export type DeployStepName = "validate" | "provision_lakebase" | "log_model" | "register_model" | "create_endpoint" | "complete";
 export type DeployStepStatus = "pending" | "running" | "done" | "error" | "skipped";
@@ -109,6 +110,7 @@ export interface DeployRequest {
   model_name: string;
   experiment_path: string;
   deploy_mode: DeployMode;
+  auth_mode: AuthMode;
   pat: string;
   // Lakebase — option A: auto-provision a new project
   lakebase_project_id: string;

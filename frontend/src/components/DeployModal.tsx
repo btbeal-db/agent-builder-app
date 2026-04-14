@@ -1,6 +1,6 @@
 import { useState, useCallback } from "react";
 import { validateGraph, deployGraphStream } from "../api";
-import type { GraphDef, StateFieldDef, DeployMode, DeployStepName, DeployStepStatus, DeployEvent } from "../types";
+import type { GraphDef, StateFieldDef, DeployMode, AuthMode, DeployStepName, DeployStepStatus, DeployEvent } from "../types";
 
 interface Props {
   graphGetter: (() => GraphDef) | null;
@@ -106,6 +106,7 @@ export default function DeployModal({ graphGetter, stateFieldsRef, onClose, defa
     : experimentName;
   const [pat, setPat] = useState(defaultPat ?? "");
   const [deployMode, setDeployMode] = useState<DeployMode>("full");
+  const [authMode, setAuthMode] = useState<AuthMode>("obo");
   const [phase, setPhase] = useState<Phase>("form");
   const [steps, setSteps] = useState<Record<string, StepState>>({});
   const [resultData, setResultData] = useState<DeployEvent["data"]>({});
@@ -162,6 +163,7 @@ export default function DeployModal({ graphGetter, stateFieldsRef, onClose, defa
           model_name: modelName,
           experiment_path: experimentPath,
           deploy_mode: deployMode,
+          auth_mode: authMode,
           pat: pat,
           lakebase_project_id: lakebaseMode === "create" ? lakebaseProjectId : "",
           lakebase_existing_project_id: lakebaseMode === "existing" ? lakebaseExistingProjectId : "",
@@ -229,6 +231,23 @@ export default function DeployModal({ graphGetter, stateFieldsRef, onClose, defa
                   ))}
                 </select>
                 <span className="deploy-hint">{MODE_DESCRIPTIONS[deployMode]}</span>
+              </label>
+
+              <label className="deploy-label">
+                Authentication
+                <select
+                  className="deploy-input"
+                  value={authMode}
+                  onChange={(e) => setAuthMode(e.target.value as AuthMode)}
+                >
+                  <option value="obo">On-Behalf-Of (User Identity)</option>
+                  <option value="passthrough">Automatic (System SP)</option>
+                </select>
+                <span className="deploy-hint">
+                  {authMode === "obo"
+                    ? "The agent acts as the calling user. Users need their own permissions on Vector Search, Genie, and UC Functions. LLM endpoints use system auth."
+                    : "A system service principal accesses all resources. Users don't need individual permissions, but the SP gets broad access."}
+                </span>
               </label>
 
               <label className="deploy-label">

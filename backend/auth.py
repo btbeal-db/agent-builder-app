@@ -19,6 +19,19 @@ from databricks.sdk import WorkspaceClient
 _user_token: ContextVar[str | None] = ContextVar("_user_token", default=None)
 _user_pat: ContextVar[str | None] = ContextVar("_user_pat", default=None)
 
+# Auth mode for served models — set once at load time, immutable per container.
+# "obo" = on-behalf-of (user identity), "passthrough" = system SP.
+_auth_mode: str = "passthrough"
+
+
+def set_auth_mode(mode: str) -> None:
+    global _auth_mode
+    _auth_mode = mode
+
+
+def get_auth_mode() -> str:
+    return _auth_mode
+
 
 def set_user_token(token: str | None) -> None:
     _user_token.set(token)
@@ -40,16 +53,21 @@ def get_data_client() -> WorkspaceClient:
     """Return a WorkspaceClient for data-access operations (VS, Genie, UC).
 
     Credential priority:
-    1. **User PAT** — full permissions, no scope gaps. Preferred when available.
-    2. **OBO token** — works for APIs with available scopes (SQL, Genie).
-       Will fail for Vector Search (no ``vector-search`` OBO scope).
-    3. **Default** — on serving endpoints, Databricks injects M2M OAuth
-       credentials for the system SP (which has access to all declared
-       resources). ``WorkspaceClient()`` picks these up automatically.
+    1. **User PAT** — full permissions, no scope gaps (app preview).
+    2. **OBO serving mode** — ``ModelServingUserCredentials`` acts as the
+       end user calling the serving endpoint.
+    3. **OBO token from Apps proxy** — works for APIs with OBO scopes.
+    4. **Default** — system SP credentials (passthrough serving mode,
+       local dev).
     """
     pat = _user_pat.get()
     if pat:
         return create_pat_client(pat)
+
+    if _auth_mode == "obo":
+        from databricks_ai_bridge import ModelServingUserCredentials
+        return WorkspaceClient(credentials_strategy=ModelServingUserCredentials())
+
     return get_workspace_client()
 
 

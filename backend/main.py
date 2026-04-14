@@ -27,6 +27,7 @@ from fastapi import FastAPI, HTTPException, Request as FastAPIRequest
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from mlflow.models.auth_policy import AuthPolicy, SystemAuthPolicy, UserAuthPolicy
 from mlflow.models.resources import (
     DatabricksFunction,
     DatabricksGenieSpace,
@@ -51,6 +52,7 @@ from .nodes import get_all_metadata
 from .lakebase import LakebaseConfig, provision_lakebase, resolve_lakebase
 from .setup import router as setup_router
 from .schema import (
+    AuthMode,
     DeployEvent,
     DeployMode,
     DeployRequest,
@@ -184,6 +186,57 @@ def _extract_resources(graph: GraphDef) -> list:
             logger.warning("Could not resolve Genie room %s dependencies: %s", room_id, exc)
 
     return resources
+
+
+def _build_auth_policy(graph: GraphDef) -> AuthPolicy:
+    """Build an AuthPolicy for OBO (on-behalf-of) deployment.
+
+    LLM serving endpoints go into SystemAuthPolicy (FMAPI rejects user tokens).
+    Data-access resources (VS, Genie, UC Functions) are represented as
+    UserAuthPolicy scopes so the served model acts as the calling user.
+    """
+    system_resources = []
+    user_scopes: set[str] = set()
+    seen_endpoints: set[str] = set()
+
+    def _scan_config(config: dict) -> None:
+        # LLM endpoints → system auth
+        endpoint = config.get("endpoint")
+        if endpoint and endpoint not in seen_endpoints:
+            seen_endpoints.add(endpoint)
+            system_resources.append(DatabricksServingEndpoint(endpoint_name=endpoint))
+
+        # VS → user scope
+        if config.get("index_name"):
+            user_scopes.add("vectorsearch.vector-search-indexes")
+
+        # Genie → user scopes (SQL warehouse + serving API)
+        if config.get("room_id"):
+            user_scopes.add("sql")
+            user_scopes.add("serving.serving-endpoints")
+
+        # UC Functions → user scope
+        if config.get("function_name"):
+            user_scopes.add("sql")
+
+    for node in graph.nodes:
+        _scan_config(node.config)
+
+        # Tools attached to LLM nodes via tools_json
+        tools_json_raw = node.config.get("tools_json", "")
+        if tools_json_raw and str(tools_json_raw).strip():
+            try:
+                tool_configs = json.loads(str(tools_json_raw))
+                if isinstance(tool_configs, list):
+                    for tc in tool_configs:
+                        _scan_config(tc.get("config", {}))
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+    return AuthPolicy(
+        system_auth_policy=SystemAuthPolicy(resources=system_resources),
+        user_auth_policy=UserAuthPolicy(api_scopes=sorted(user_scopes)),
+    )
 
 
 def _collect_code_paths() -> list[str]:
@@ -627,13 +680,16 @@ def deploy_graph(req: DeployRequest):
             experiment = mlflow.set_experiment(req.experiment_path)
             result_data["experiment_id"] = experiment.experiment_id
 
+            # Persist auth_mode into the graph_def artifact so the served
+            # model knows which credential strategy to use at runtime.
+            graph_for_artifact = req.graph.model_copy()
+            graph_for_artifact.auth_mode = req.auth_mode.value
+
             with tempfile.NamedTemporaryFile(
                 mode="w", suffix=".json", delete=False
             ) as f:
-                f.write(req.graph.model_dump_json())
+                f.write(graph_for_artifact.model_dump_json())
                 graph_def_path = f.name
-
-            resources = _extract_resources(req.graph)
 
             requirements_path = _BACKEND_DIR.parent / "requirements-serving.txt"
             if not requirements_path.exists():
@@ -643,6 +699,16 @@ def deploy_graph(req: DeployRequest):
                     "--python-version 3.11"
                 )
 
+            # Build resource declarations based on auth mode:
+            # - OBO: auth_policy with system resources (LLM) + user scopes (VS, Genie, UC)
+            # - Passthrough: resources list with system SP access to everything
+            if req.auth_mode == AuthMode.OBO:
+                auth_policy = _build_auth_policy(req.graph)
+                resource_kwargs = {"auth_policy": auth_policy}
+            else:
+                resources = _extract_resources(req.graph)
+                resource_kwargs = {"resources": resources if resources else None}
+
             run = mlflow.start_run()
             try:
                 model_info = mlflow.pyfunc.log_model(
@@ -651,7 +717,7 @@ def deploy_graph(req: DeployRequest):
                     artifacts={"graph_def": graph_def_path},
                     code_paths=_collect_code_paths(),
                     pip_requirements=str(requirements_path),
-                    resources=resources if resources else None,
+                    **resource_kwargs,
                 )
             except Exception:
                 mlflow.end_run()

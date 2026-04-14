@@ -89,7 +89,11 @@ class UCFunctionNode(BaseNode):
                         logger.warning("Invalid parameters JSON from '%s': %s", params_from, raw_params)
 
         try:
-            toolkit = UCFunctionToolkit(function_names=[function_name])
+            from databricks_langchain.uc_ai import DatabricksFunctionClient
+            from ..auth import get_data_client
+            w = get_data_client()
+            client = DatabricksFunctionClient(client=w)
+            toolkit = UCFunctionToolkit(function_names=[function_name], client=client)
             tools = toolkit.tools
             if not tools:
                 return {

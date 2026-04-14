@@ -38,6 +38,7 @@ class GraphDef(BaseModel):
         StateFieldDef(name="input", type="str", description="The initial input")
     ]
     output_fields: list[str] = []  # which state fields to include in output; empty = all
+    auth_mode: str = "obo"  # "obo" or "passthrough"; plain str for backward compat
 
     @property
     def state_variable_names(self) -> list[str]:
@@ -84,6 +85,11 @@ class ExportResponse(BaseModel):
     error: str | None = None
 
 
+class AuthMode(str, Enum):
+    OBO = "obo"
+    PASSTHROUGH = "passthrough"
+
+
 class DeployMode(str, Enum):
     LOG_ONLY = "log_only"
     LOG_AND_REGISTER = "log_and_register"
@@ -109,6 +115,7 @@ class DeployRequest(BaseModel):
     model_name: str = ""  # Unity Catalog path: catalog.schema.model_name
     experiment_path: str  # MLflow experiment: /Users/email/experiment
     deploy_mode: DeployMode = DeployMode.FULL
+    auth_mode: AuthMode = AuthMode.OBO
     pat: str = ""  # Optional PAT for UC registration + endpoint creation
 
     # Lakebase checkpointing — option A: auto-provision a new project

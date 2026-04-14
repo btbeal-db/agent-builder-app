@@ -214,6 +214,10 @@ class AgentGraphModel(ResponsesAgent):
             raw = json.load(f)
         self.graph_def = GraphDef(**raw)
 
+        # Set auth mode so get_data_client() returns the right client type
+        from backend.auth import set_auth_mode
+        set_auth_mode(self.graph_def.auth_mode)
+
         # Prefer dynamic token refresh (LAKEBASE_ENDPOINT/HOST/DATABASE),
         # fall back to static connection string (LAKEBASE_CONN_STRING).
         self.checkpointer = None
