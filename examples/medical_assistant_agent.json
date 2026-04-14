@@ -1,0 +1,54 @@
+{
+  "nodes": [
+    {
+      "id": "node_4",
+      "type": "llm",
+      "name": "",
+      "writes_to": "agent_output",
+      "config": {
+        "system_prompt": "You are a helpful medical office assistant that attempts to answer questions asked of you about patients. ",
+        "temperature": 0.7,
+        "include_state_variables": "false",
+        "include_message_history": "true",
+        "last_n_messages": 0,
+        "endpoint": "databricks-claude-sonnet-4-6",
+        "tools_json": "[{\"type\":\"vector_search\",\"config\":{\"tool_description\":\"A vector search index full of patient notes, which returns patient ids, note ids, and the patient note\",\"index_name\":\"agentbuilder_serverless_stable_catalog.agent_builder.patient_notes_index\",\"endpoint_name\":\"agent-builder-vs\",\"columns\":\"patient_id, note_id, text\"}},{\"type\":\"genie\",\"config\":{\"room_id\":\"01f127940d8719c3a222314e628d71a7\",\"tool_description\":\"A text2sql agent that queries a sql warehouse of patient demographics and notes with a plain text user query.\"}}]"
+      },
+      "position": {
+        "x": 210.53521126760563,
+        "y": 177.9492957746479
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "xy-edge__node_4-__end__",
+      "source": "node_4",
+      "target": "__end__",
+      "source_handle": null
+    },
+    {
+      "id": "xy-edge____start__-node_4",
+      "source": "__start__",
+      "target": "node_4",
+      "source_handle": null
+    }
+  ],
+  "state_fields": [
+    {
+      "name": "input",
+      "type": "str",
+      "description": "The initial input",
+      "sub_fields": []
+    },
+    {
+      "name": "agent_output",
+      "type": "str",
+      "description": "The output of genie field",
+      "sub_fields": []
+    }
+  ],
+  "output_fields": [
+    "agent_output"
+  ]
+}

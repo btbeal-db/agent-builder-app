@@ -1,0 +1,148 @@
+{
+  "nodes": [
+    {
+      "id": "node_1",
+      "type": "llm",
+      "name": "Email Drafter",
+      "writes_to": "draft_email",
+      "config": {
+        "system_prompt": "You are an expert email writer. Draft a professional email based on the user's request.\n\nIf the conversation history contains a previous draft and revision feedback, carefully incorporate that feedback to improve the email. Do not repeat the same mistakes.\n\nThe user's request: {input}\n\nRespond with ONLY the email content — a Subject line followed by the body. No preamble, no commentary.",
+        "temperature": 0.7,
+        "include_state_variables": "false",
+        "include_message_history": "true",
+        "last_n_messages": 0,
+        "endpoint": "databricks-claude-sonnet-4-6"
+      },
+      "position": {
+        "x": -310.615631339706,
+        "y": 260.82528697259363
+      }
+    },
+    {
+      "id": "node_2",
+      "type": "human_input",
+      "name": "Review Gate",
+      "writes_to": "user_feedback",
+      "config": {
+        "prompt": "Here's the draft:\n\n{draft_email}\n\nType 'approve' to send, 'revise' to request changes, or 'start over' to rewrite from scratch."
+      },
+      "position": {
+        "x": -135.03494260548126,
+        "y": 463.6242333487356
+      }
+    },
+    {
+      "id": "node_3",
+      "type": "router",
+      "name": "Decision",
+      "writes_to": "",
+      "config": {
+        "evaluates": "user_feedback",
+        "routes_json": [
+          {
+            "label": "Approve",
+            "match_value": "approve, yes, looks good, send, lgtm, good"
+          },
+          {
+            "label": "Revise",
+            "match_value": "revise, change, edit, modify, update, tweak, no"
+          },
+          {
+            "label": "Start Over",
+            "match_value": ""
+          }
+        ]
+      },
+      "position": {
+        "x": 387.7113225777573,
+        "y": 554.8094826147226
+      }
+    },
+    {
+      "id": "node_4",
+      "type": "human_input",
+      "name": "Revision Notes",
+      "writes_to": "revision_notes",
+      "config": {
+        "prompt": "What changes would you like? Describe your revisions:"
+      },
+      "position": {
+        "x": 255.0000000000001,
+        "y": 302
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "xy-edge____start__-node_1",
+      "source": "__start__",
+      "target": "node_1",
+      "source_handle": null
+    },
+    {
+      "id": "xy-edge__node_1-node_2",
+      "source": "node_1",
+      "target": "node_2",
+      "source_handle": null
+    },
+    {
+      "id": "xy-edge__node_2-node_3",
+      "source": "node_2",
+      "target": "node_3",
+      "source_handle": null
+    },
+    {
+      "id": "xy-edge__node_3approve-__end__",
+      "source": "node_3",
+      "target": "__end__",
+      "source_handle": "approve, yes, looks good, send, lgtm, good"
+    },
+    {
+      "id": "xy-edge__node_3revise-node_4",
+      "source": "node_3",
+      "target": "node_4",
+      "source_handle": "revise, change, edit, modify, update, tweak, no"
+    },
+    {
+      "id": "xy-edge__node_3default-node_1",
+      "source": "node_3",
+      "target": "node_1",
+      "source_handle": "Start Over"
+    },
+    {
+      "id": "xy-edge__node_4-node_1",
+      "source": "node_4",
+      "target": "node_1",
+      "source_handle": null
+    }
+  ],
+  "state_fields": [
+    {
+      "name": "input",
+      "type": "str",
+      "description": "The user's email request",
+      "sub_fields": []
+    },
+    {
+      "name": "draft_email",
+      "type": "str",
+      "description": "The current email draft",
+      "sub_fields": []
+    },
+    {
+      "name": "user_feedback",
+      "type": "str",
+      "description": "User's review decision (approve, revise, or start over)",
+      "sub_fields": []
+    },
+    {
+      "name": "revision_notes",
+      "type": "str",
+      "description": "Specific changes the user wants made",
+      "sub_fields": []
+    }
+  ],
+  "output_fields": [
+    "draft_email"
+  ]
+}

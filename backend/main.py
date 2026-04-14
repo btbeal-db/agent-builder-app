@@ -91,10 +91,14 @@ def _extract_resources(graph: GraphDef) -> list:
     """Extract Databricks resource declarations from all nodes in the graph.
 
     Maps node config fields to the appropriate MLflow resource types so that
-    Model Serving provisions credentials (OBO) for each external resource.
+    Model Serving provisions credentials for each external resource via
+    automatic authentication passthrough.
+
+    Handles both top-level node config fields (e.g. VS node's ``index_name``)
+    and tool configs embedded in an LLM node's ``tools_json`` string.
     """
     resources = []
-    seen = set()
+    seen: set[tuple[str, str]] = set()
 
     # Config field name → resource class mapping
     resource_map = {
@@ -106,19 +110,37 @@ def _extract_resources(graph: GraphDef) -> list:
         "function_name": DatabricksFunction,          # UC functions
     }
 
-    for node in graph.nodes:
+    init_param_map = {
+        DatabricksServingEndpoint: "endpoint_name",
+        DatabricksVectorSearchIndex: "index_name",
+        DatabricksGenieSpace: "genie_space_id",
+        DatabricksTable: "table_name",
+        DatabricksFunction: "function_name",
+    }
+
+    def _add_from_config(config: dict) -> None:
         for config_key, resource_cls in resource_map.items():
-            value = node.config.get(config_key)
+            value = config.get(config_key)
             if value and (config_key, value) not in seen:
                 seen.add((config_key, value))
-                init_param = {
-                    DatabricksServingEndpoint: "endpoint_name",
-                    DatabricksVectorSearchIndex: "index_name",
-                    DatabricksGenieSpace: "genie_space_id",
-                    DatabricksTable: "table_name",
-                    DatabricksFunction: "function_name",
-                }[resource_cls]
-                resources.append(resource_cls(**{init_param: value}))
+                resources.append(
+                    resource_cls(**{init_param_map[resource_cls]: value})
+                )
+
+    for node in graph.nodes:
+        # Top-level node config (VS node, Genie node, UC Function node, etc.)
+        _add_from_config(node.config)
+
+        # Tools attached to LLM nodes via tools_json
+        tools_json_raw = node.config.get("tools_json", "")
+        if tools_json_raw and str(tools_json_raw).strip():
+            try:
+                tool_configs = json.loads(str(tools_json_raw))
+                if isinstance(tool_configs, list):
+                    for tc in tool_configs:
+                        _add_from_config(tc.get("config", {}))
+            except (json.JSONDecodeError, TypeError):
+                pass
 
     return resources
 
@@ -706,8 +728,6 @@ def deploy_graph(req: DeployRequest):
                 env_vars["LAKEBASE_ENDPOINT"] = lb_config.endpoint
                 env_vars["LAKEBASE_HOST"] = lb_config.host
                 env_vars["LAKEBASE_DATABASE"] = lb_config.database
-                # The app's SP has a Lakebase role; inject its creds so the
-                # serving container uses it instead of the endpoint's own SP.
                 env_vars["LAKEBASE_SP_CLIENT_ID"] = sp_id_for_env
                 env_vars["LAKEBASE_SP_CLIENT_SECRET"] = sp_secret_for_env
                 env_vars["LAKEBASE_SP_HOST"] = sp_host_for_env

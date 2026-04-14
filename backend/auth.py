@@ -43,6 +43,9 @@ def get_data_client() -> WorkspaceClient:
     1. **User PAT** — full permissions, no scope gaps. Preferred when available.
     2. **OBO token** — works for APIs with available scopes (SQL, Genie).
        Will fail for Vector Search (no ``vector-search`` OBO scope).
+    3. **Default** — on serving endpoints, Databricks injects M2M OAuth
+       credentials for the system SP (which has access to all declared
+       resources). ``WorkspaceClient()`` picks these up automatically.
     """
     pat = _user_pat.get()
     if pat:
