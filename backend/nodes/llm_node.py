@@ -299,9 +299,9 @@ class LLMNode(BaseNode):
             # LLM wants to call tools — execute them and loop
             messages_for_llm.append(response)
             trace_messages.append({
-                "role": "assistant",
+                "role": "system",
                 "content": f"[Tool calls: {', '.join(tc['name'] for tc in response.tool_calls)}]",
-                "node": "llm",
+                "node": "tool",
             })
 
             tool_map = {t.name: t for t in tools}
