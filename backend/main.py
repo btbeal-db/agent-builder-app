@@ -31,6 +31,7 @@ from mlflow.models.resources import (
     DatabricksFunction,
     DatabricksGenieSpace,
     DatabricksServingEndpoint,
+    DatabricksSQLWarehouse,
     DatabricksTable,
     DatabricksVectorSearchIndex,
 )
@@ -96,6 +97,10 @@ def _extract_resources(graph: GraphDef) -> list:
 
     Handles both top-level node config fields (e.g. VS node's ``index_name``)
     and tool configs embedded in an LLM node's ``tools_json`` string.
+
+    For Genie spaces, also discovers and declares downstream dependencies
+    (tables and SQL warehouse) by querying the Genie API, as required by
+    the automatic auth passthrough docs.
     """
     resources = []
     seen: set[tuple[str, str]] = set()
@@ -120,6 +125,9 @@ def _extract_resources(graph: GraphDef) -> list:
         DatabricksFunction: "function_name",
     }
 
+    # Collect Genie room IDs so we can resolve their dependencies after
+    genie_room_ids: list[str] = []
+
     def _add_from_config(config: dict) -> None:
         for config_key, resource_cls in resource_map.items():
             value = config.get(config_key)
@@ -128,6 +136,8 @@ def _extract_resources(graph: GraphDef) -> list:
                 resources.append(
                     resource_cls(**{init_param_map[resource_cls]: value})
                 )
+                if config_key == "room_id":
+                    genie_room_ids.append(value)
 
     for node in graph.nodes:
         # Top-level node config (VS node, Genie node, UC Function node, etc.)
@@ -143,6 +153,30 @@ def _extract_resources(graph: GraphDef) -> list:
                         _add_from_config(tc.get("config", {}))
             except (json.JSONDecodeError, TypeError):
                 pass
+
+    # Resolve Genie downstream dependencies (tables + SQL warehouse).
+    # The auth passthrough docs require these to be explicitly declared.
+    for room_id in genie_room_ids:
+        try:
+            sp = get_sp_workspace_client()
+            space = sp.genie.get_space(room_id)
+
+            # SQL warehouse
+            if space.warehouse_id and ("warehouse", space.warehouse_id) not in seen:
+                seen.add(("warehouse", space.warehouse_id))
+                resources.append(DatabricksSQLWarehouse(warehouse_id=space.warehouse_id))
+
+            # Tables from the serialized space definition
+            if space.serialized_space:
+                space_def = json.loads(space.serialized_space)
+                tables = space_def.get("data_sources", {}).get("tables", [])
+                for table in tables:
+                    table_id = table.get("identifier", "")
+                    if table_id and ("table_name", table_id) not in seen:
+                        seen.add(("table_name", table_id))
+                        resources.append(DatabricksTable(table_name=table_id))
+        except Exception as exc:
+            logger.warning("Could not resolve Genie room %s dependencies: %s", room_id, exc)
 
     return resources
 
