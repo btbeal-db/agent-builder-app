@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { ReactFlowProvider } from "@xyflow/react";
-import { Home, Hammer, HelpCircle, Trash2, CloudDownload, Save, Upload, MessageSquare, Rocket, Sparkles, Settings, Key } from "lucide-react";
+import { Home, Hammer, HelpCircle, Trash2, CloudDownload, Save, Upload, MessageSquare, Rocket, Sparkles, Settings, Key, Package } from "lucide-react";
 import Canvas from "./components/Canvas";
 import NodePalette from "./components/NodePalette";
 import StateModelModal from "./components/StateModelModal";
@@ -12,11 +12,12 @@ import HelpPage from "./components/HelpPage";
 import BuilderWalkthrough from "./components/BuilderWalkthrough";
 import AIChatDropdown from "./components/AIChatDropdown";
 import SetupPage from "./components/SetupPage";
+import ModelsPage from "./components/ModelsPage";
 import { StateProvider } from "./StateContext";
 import { fetchNodeTypes, getSetupStatus } from "./api";
 import type { NodeTypeMetadata, GraphDef, StateFieldDef, SetupStatusResponse } from "./types";
 
-type AppView = "home" | "builder" | "help" | "setup";
+type AppView = "home" | "builder" | "models" | "help" | "setup";
 
 export default function App() {
   const [nodeTypes, setNodeTypes] = useState<NodeTypeMetadata[]>([]);
@@ -322,6 +323,14 @@ export default function App() {
               <span>Builder</span>
             </button>
             <button
+              className={`nav-rail-btn${view === "models" ? " active" : ""}`}
+              onClick={() => setView("models")}
+              title="Models"
+            >
+              <Package size={18} />
+              <span>Models</span>
+            </button>
+            <button
               className={`nav-rail-btn${view === "help" ? " active" : ""}`}
               onClick={() => setView("help")}
               title="Help"
@@ -345,6 +354,17 @@ export default function App() {
 
           {view === "help" && (
             <HelpPage onGoToBuilder={openBuilder} />
+          )}
+
+          {view === "models" && (
+            <ModelsPage
+              graphImporter={graphImporter}
+              setStateFields={setStateFields}
+              onSwitchToBuilder={() => {
+                setView("builder");
+                hasOpenedBuilder.current = true;
+              }}
+            />
           )}
 
           {view === "setup" && (

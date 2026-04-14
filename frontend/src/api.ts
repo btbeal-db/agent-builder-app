@@ -109,6 +109,23 @@ export async function deployGraphStream(
   }
 }
 
+// ── Models listing ─────────────────────────────────────────────────────────
+
+export async function fetchModels(): Promise<import("./types").ModelsResponse> {
+  const res = await fetch(`${BASE}/models`);
+  if (!res.ok) throw new Error("Failed to fetch models");
+  return res.json();
+}
+
+export async function fetchModelGraph(runId: string): Promise<import("./types").GraphDef> {
+  const res = await fetch(`${BASE}/models/${runId}/graph`);
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({ detail: "Failed to load graph" }));
+    throw new Error(detail.detail || "Failed to load graph");
+  }
+  return res.json();
+}
+
 // ── Setup (MLflow experiment one-time config) ──────────────────────────────
 
 export async function getSetupStatus(): Promise<SetupStatusResponse> {

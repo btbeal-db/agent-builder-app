@@ -151,3 +151,25 @@ class SetupValidateResponse(BaseModel):
     success: bool
     experiment_id: str | None = None
     error: str | None = None
+
+
+# ── Models listing ──────────────────────────────────────────────────────────
+
+
+class ModelInfo(BaseModel):
+    name: str
+    experiment_id: str
+    latest_run_id: str | None = None
+    latest_run_time: str | None = None
+    deploy_mode: str | None = None
+    registered_model_name: str | None = None
+    endpoint_name: str | None = None
+    node_count: int | None = None
+    node_types: list[str] = []
+    has_graph_def: bool = False
+    experiment_url: str = ""
+
+
+class ModelsResponse(BaseModel):
+    models: list[ModelInfo]
+    workspace_url: str = ""

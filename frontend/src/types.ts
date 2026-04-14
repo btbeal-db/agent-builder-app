@@ -128,6 +128,27 @@ export interface ChatMessage {
   loading?: boolean;
 }
 
+// ── Models listing ─────────────────────────────────────────────────────────
+
+export interface ModelInfo {
+  name: string;
+  experiment_id: string;
+  latest_run_id: string | null;
+  latest_run_time: string | null;
+  deploy_mode: string | null;
+  registered_model_name: string | null;
+  endpoint_name: string | null;
+  node_count: number | null;
+  node_types: string[];
+  has_graph_def: boolean;
+  experiment_url: string;
+}
+
+export interface ModelsResponse {
+  models: ModelInfo[];
+  workspace_url: string;
+}
+
 // ── Setup (MLflow experiment one-time config) ──────────────────────────────
 
 export interface SetupStatusResponse {

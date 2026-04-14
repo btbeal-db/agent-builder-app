@@ -212,3 +212,6 @@ __marimo__/
 # MLflow local artifacts
 mlruns/
 mlflow.db
+
+# Demo examples (contain workspace-specific resource IDs)
+examples/

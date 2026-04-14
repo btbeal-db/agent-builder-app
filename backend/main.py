@@ -55,6 +55,8 @@ from .schema import (
     DeployRequest,
     DeployStepStatus,
     GraphDef,
+    ModelInfo,
+    ModelsResponse,
     PreviewRequest,
     PreviewResponse,
 )
@@ -581,6 +583,16 @@ def deploy_graph(req: DeployRequest):
                 )
 
             run = mlflow.start_run()
+            # Persist metadata as run tags so the Models page can list them
+            # without downloading artifacts (presigned URLs are unreachable
+            # from Databricks Apps networking).
+            mlflow.set_tag("graph_def_json", req.graph.model_dump_json())
+            mlflow.set_tag("deploy_mode", req.deploy_mode.value)
+            if req.model_name:
+                mlflow.set_tag("registered_model_name", req.model_name)
+                if needs_endpoint:
+                    mlflow.set_tag("endpoint_name",
+                                   req.model_name.split(".")[-1].replace("_", "-"))
             try:
                 model_info = mlflow.pyfunc.log_model(
                     artifact_path="agent",
@@ -783,6 +795,102 @@ def deploy_graph(req: DeployRequest):
             "X-Accel-Buffering": "no",
         },
     )
+
+
+# ── Models listing ────────────────────────────────────────────────────────────
+
+
+@app.get("/api/models", response_model=ModelsResponse)
+def list_models():
+    """List deployed models from the user's MLflow experiment folder."""
+    from .setup import setup_status
+
+    status = setup_status()
+    if not status.setup_complete or not status.experiment_path:
+        return ModelsResponse(models=[])
+
+    base_path = status.experiment_path
+    host = os.environ.get("DATABRICKS_HOST", "").rstrip("/")
+
+    prev_uri = mlflow.get_tracking_uri()
+    try:
+        mlflow.set_tracking_uri("databricks")
+        experiments = mlflow.search_experiments(
+            filter_string=f"name LIKE '{base_path}/%'",
+        )
+
+        models: list[ModelInfo] = []
+        for exp in experiments:
+            name = exp.name.rsplit("/", 1)[-1]
+            exp_url = f"{host}/#/ml/experiments/{exp.experiment_id}" if host else ""
+
+            info = ModelInfo(
+                name=name,
+                experiment_id=exp.experiment_id,
+                experiment_url=exp_url,
+            )
+
+            # Get latest run
+            runs = mlflow.search_runs(
+                experiment_ids=[exp.experiment_id],
+                max_results=1,
+                order_by=["start_time DESC"],
+            )
+            if not runs.empty:
+                row = runs.iloc[0]
+                info.latest_run_id = row.get("run_id")
+                start_time = row.get("start_time")
+                if start_time is not None:
+                    info.latest_run_time = str(start_time)
+
+                # Read tags
+                info.deploy_mode = row.get("tags.deploy_mode")
+                info.registered_model_name = row.get("tags.registered_model_name")
+                info.endpoint_name = row.get("tags.endpoint_name")
+                info.has_graph_def = bool(row.get("tags.graph_def_json"))
+
+                # Parse graph_def for summary info
+                graph_json = row.get("tags.graph_def_json")
+                if graph_json:
+                    try:
+                        graph = json.loads(graph_json)
+                        nodes = graph.get("nodes", [])
+                        info.node_count = len(nodes)
+                        info.node_types = sorted(
+                            set(n.get("type", "") for n in nodes)
+                        )
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+
+            models.append(info)
+
+        models.sort(key=lambda m: m.latest_run_time or "", reverse=True)
+        return ModelsResponse(models=models, workspace_url=host)
+    finally:
+        mlflow.set_tracking_uri(prev_uri)
+
+
+@app.get("/api/models/{run_id}/graph")
+def get_model_graph(run_id: str):
+    """Return the graph definition from a run's tags."""
+    prev_uri = mlflow.get_tracking_uri()
+    try:
+        mlflow.set_tracking_uri("databricks")
+        run = mlflow.get_run(run_id)
+        graph_json = run.data.tags.get("graph_def_json")
+        if not graph_json:
+            raise HTTPException(
+                status_code=404,
+                detail="No graph definition found for this run. "
+                       "Only models deployed after this update include the graph tag.",
+            )
+        return json.loads(graph_json)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        mlflow.set_tracking_uri(prev_uri)
 
 
 # ── Serve frontend build ──────────────────────────────────────────────────────
