@@ -107,7 +107,13 @@ def _make_genie_tool(config: dict[str, Any]) -> BaseTool:
     def genie_query(question: str) -> str:
         """Ask a natural-language question to get structured data answers."""
         w = get_data_client()
-        message = w.genie.start_conversation_and_wait(room_id, question)
+        try:
+            message = w.genie.start_conversation_and_wait(room_id, question)
+        except Exception as exc:
+            # start_conversation_and_wait raises OperationFailed when the
+            # Genie query fails (e.g. SQL error, permissions). Return the
+            # error as text so the LLM can inform the user gracefully.
+            return f"Genie error: {exc}"
 
         if message.status == MessageStatus.FAILED:
             error_text = message.error.message if message.error else "Unknown error"
