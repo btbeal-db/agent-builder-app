@@ -100,10 +100,12 @@ def _extract_resources(graph: GraphDef) -> list:
     resources = []
     seen: set[tuple[str, str]] = set()
 
-    # Config field name → resource class mapping
+    # Config field name → resource class mapping.
+    # Note: "endpoint_name" is the Vector Search endpoint (infrastructure),
+    # NOT a Model Serving endpoint — it does not need a resource declaration.
+    # Only the VS index itself needs to be declared.
     resource_map = {
         "endpoint": DatabricksServingEndpoint,        # LLM serving endpoints
-        "endpoint_name": DatabricksServingEndpoint,   # VS endpoint names
         "index_name": DatabricksVectorSearchIndex,    # VS indexes
         "room_id": DatabricksGenieSpace,              # Genie rooms
         "table_name": DatabricksTable,                # UC tables
