@@ -10,6 +10,7 @@ import json
 import logging
 from typing import Any
 
+from databricks.sdk import WorkspaceClient
 from databricks.sdk.service.dashboards import MessageStatus
 
 from .auth import get_data_client
@@ -188,26 +189,63 @@ def _get_mcp_client(server_url: str):
     """Create a ``DatabricksMCPClient`` with the right auth for the URL.
 
     * **Databricks Apps** (``*.databricksapps.com``) require OAuth.
-      ``get_data_client()`` may return a PAT client, which the MCP SDK
-      rejects.  We fall back to the OBO workspace client (OAuth) or SP.
-    * **Managed MCP** (``/api/2.0/mcp/...``) works with any credential.
+      ``DatabricksMCPClient`` checks ``config.oauth_token()`` and rejects
+      PAT-style clients.  We create an OAuth-compatible client from the
+      OBO token (Apps proxy) or SP credentials.
+    * **Managed MCP** (``/api/2.0/mcp/...``) works with any credential
+      (PAT, OBO, SP).
     """
+    import os
     from urllib.parse import urlparse
     from databricks_mcp import DatabricksMCPClient
 
     is_apps_url = urlparse(server_url).netloc.endswith(".databricksapps.com")
 
     if is_apps_url:
-        # Apps require OAuth; try OBO first (workspace client), then SP
-        from .auth import get_workspace_client, get_sp_workspace_client
-        for factory in (get_workspace_client, get_sp_workspace_client):
-            try:
-                return DatabricksMCPClient(server_url=server_url, workspace_client=factory())
-            except (ValueError, RuntimeError):
-                continue
-        # Last resort: try data client anyway (may work in deployed OBO mode)
-        return DatabricksMCPClient(server_url=server_url, workspace_client=get_data_client())
+        from .auth import get_user_token, get_sp_workspace_client
 
+        # 1. OBO token from the Apps proxy — this IS an OAuth token, but
+        #    get_workspace_client() wraps it with auth_type="pat" (to avoid
+        #    SP credential contamination), which DatabricksMCPClient rejects.
+        #    Create the client without auth_type so the SDK auto-detects
+        #    bearer-token auth as OAuth-compatible.
+        obo_token = get_user_token()
+        host = os.environ.get("DATABRICKS_HOST", "")
+        if obo_token and host:
+            masked = {}
+            for key in ("DATABRICKS_CLIENT_ID", "DATABRICKS_CLIENT_SECRET"):
+                if key in os.environ:
+                    masked[key] = os.environ.pop(key)
+            try:
+                w = WorkspaceClient(host=host, token=obo_token)
+                return DatabricksMCPClient(server_url=server_url, workspace_client=w)
+            except (ValueError, RuntimeError):
+                pass
+            finally:
+                os.environ.update(masked)
+
+        # 2. SP credentials (OAuth client-credentials) — works if the SP
+        #    has been granted query permissions on the target app.
+        try:
+            return DatabricksMCPClient(
+                server_url=server_url,
+                workspace_client=get_sp_workspace_client(),
+            )
+        except (ValueError, RuntimeError):
+            pass
+
+        # 3. Serving OBO mode (ModelServingUserCredentials)
+        from .auth import get_auth_mode
+        if get_auth_mode() == "obo":
+            from databricks_ai_bridge import ModelServingUserCredentials
+            return DatabricksMCPClient(
+                server_url=server_url,
+                workspace_client=WorkspaceClient(
+                    credentials_strategy=ModelServingUserCredentials(),
+                ),
+            )
+
+    # Managed MCP or fallback — PAT > OBO > SP all work
     return DatabricksMCPClient(server_url=server_url, workspace_client=get_data_client())
 
 
