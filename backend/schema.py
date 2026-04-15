@@ -163,6 +163,11 @@ class SetupValidateResponse(BaseModel):
 # ── Models listing ──────────────────────────────────────────────────────────
 
 
+class ResourceLink(BaseModel):
+    label: str       # e.g. "VS: patient_notes_index"
+    url: str = ""    # deep link into Databricks workspace
+
+
 class ModelInfo(BaseModel):
     name: str
     experiment_id: str
@@ -171,7 +176,7 @@ class ModelInfo(BaseModel):
     deploy_mode: str | None = None
     registered_model_name: str | None = None
     endpoint_name: str | None = None
-    resources: list[str] = []  # e.g. ["VS: my_index", "Genie: room_id", "Lakebase"]
+    resources: list[ResourceLink] = []
     has_graph_def: bool = False
     experiment_url: str = ""
 

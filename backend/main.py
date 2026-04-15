@@ -243,27 +243,53 @@ def _build_auth_policy(graph: GraphDef) -> AuthPolicy:
     )
 
 
-def _extract_resource_labels(graph: dict) -> list[str]:
-    """Build human-readable resource labels from a raw graph dict.
+def _extract_resource_links(graph: dict, host: str) -> list:
+    """Build resource labels with deep links from a raw graph dict.
 
     Used by the Models listing to show what Databricks resources a model uses.
     """
-    labels: list[str] = []
+    from .schema import ResourceLink
+
+    links: list[ResourceLink] = []
     seen: set[str] = set()
 
+    def _add(key: str, val: str) -> None:
+        if not val or val in seen:
+            return
+        seen.add(val)
+        short = val.rsplit(".", 1)[-1] if "." in val else val
+
+        if key == "endpoint":
+            links.append(ResourceLink(
+                label=f"LLM: {short}",
+                url=f"{host}/serving-endpoints/{val}" if host else "",
+            ))
+        elif key == "index_name":
+            # VS index is a UC table: catalog.schema.index
+            parts = val.split(".")
+            uc_path = "/".join(parts) if len(parts) == 3 else val
+            links.append(ResourceLink(
+                label=f"VS: {short}",
+                url=f"{host}/explore/data/{uc_path}" if host else "",
+            ))
+        elif key == "room_id":
+            links.append(ResourceLink(
+                label=f"Genie: {short}",
+                url=f"{host}/genie/rooms/{val}" if host else "",
+            ))
+        elif key == "function_name":
+            parts = val.split(".")
+            uc_path = "/".join(parts) if len(parts) == 3 else val
+            links.append(ResourceLink(
+                label=f"UC Fn: {short}",
+                url=f"{host}/explore/data/{uc_path}" if host else "",
+            ))
+
     def _scan(config: dict) -> None:
-        for key, prefix in [
-            ("endpoint", "LLM"),
-            ("index_name", "VS"),
-            ("room_id", "Genie"),
-            ("function_name", "UC Fn"),
-        ]:
+        for key in ("endpoint", "index_name", "room_id", "function_name"):
             val = config.get(key)
-            if val and val not in seen:
-                seen.add(val)
-                # Shorten long names: take last segment for dotted paths
-                short = val.rsplit(".", 1)[-1] if "." in val else val
-                labels.append(f"{prefix}: {short}")
+            if val:
+                _add(key, val)
 
     for node in graph.get("nodes", []):
         _scan(node.get("config", {}))
@@ -275,7 +301,7 @@ def _extract_resource_labels(graph: dict) -> list[str]:
             except (json.JSONDecodeError, TypeError):
                 pass
 
-    return labels
+    return links
 
 
 def _collect_code_paths() -> list[str]:
@@ -1023,19 +1049,23 @@ def list_models():
                 info.endpoint_name = row.get("tags.endpoint_name")
                 info.has_graph_def = bool(row.get("tags.graph_def_json"))
 
-                # Parse graph_def for resource summary
+                # Parse graph_def for resource summary with links
                 graph_json = row.get("tags.graph_def_json")
                 if graph_json:
                     try:
                         graph = json.loads(graph_json)
-                        info.resources = _extract_resource_labels(graph)
+                        info.resources = _extract_resource_links(graph, host)
                     except (json.JSONDecodeError, TypeError):
                         pass
 
                 # Lakebase
                 lb_project = row.get("tags.lakebase_project")
                 if lb_project:
-                    info.resources.append(f"Lakebase: {lb_project}")
+                    from .schema import ResourceLink
+                    info.resources.append(ResourceLink(
+                        label=f"Lakebase: {lb_project}",
+                        url=f"{host}/compute/lakebase" if host else "",
+                    ))
 
             models.append(info)
 

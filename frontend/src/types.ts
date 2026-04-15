@@ -132,6 +132,11 @@ export interface ChatMessage {
 
 // ── Models listing ─────────────────────────────────────────────────────────
 
+export interface ResourceLink {
+  label: string;
+  url: string;
+}
+
 export interface ModelInfo {
   name: string;
   experiment_id: string;
@@ -140,7 +145,7 @@ export interface ModelInfo {
   deploy_mode: string | null;
   registered_model_name: string | null;
   endpoint_name: string | null;
-  resources: string[];
+  resources: ResourceLink[];
   has_graph_def: boolean;
   experiment_url: string;
 }

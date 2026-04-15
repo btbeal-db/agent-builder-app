@@ -118,9 +118,21 @@ export default function ModelsPage({ graphImporter, setStateFields, onSwitchToBu
                   <td>
                     {m.resources.length > 0 ? (
                       <div className="models-resources">
-                        {m.resources.map((r) => (
-                          <span key={r} className="models-resource-tag">{r}</span>
-                        ))}
+                        {m.resources.map((r) =>
+                          r.url ? (
+                            <a
+                              key={r.label}
+                              href={r.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="models-resource-tag models-resource-link"
+                            >
+                              {r.label}
+                            </a>
+                          ) : (
+                            <span key={r.label} className="models-resource-tag">{r.label}</span>
+                          )
+                        )}
                       </div>
                     ) : (
                       "--"

@@ -3854,6 +3854,12 @@ h4.md-header { font-size: 0.82em; }
   color: var(--text-secondary);
   border: 1px solid var(--border);
   white-space: nowrap;
+  text-decoration: none;
+}
+
+.models-resource-link:hover {
+  color: var(--accent);
+  border-color: var(--accent);
 }
 
 .models-actions {
