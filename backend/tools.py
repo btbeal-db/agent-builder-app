@@ -299,7 +299,7 @@ def _make_mcp_tools(config: dict[str, Any]) -> list[BaseTool]:
     for mcp_tool in mcp_tools:
         def _make_fn(tool_name: str = mcp_tool.name) -> Any:
             def call_tool(**kwargs: Any) -> str:
-                tok = _get_mcp_token()  # fresh token per call
+                tok = _get_mcp_token(server_url)  # fresh token per call
                 result = _run_mcp_in_thread(
                     _mcp_call_tool, server_url, tok, tool_name, kwargs,
                 )
