@@ -120,7 +120,7 @@ def _ensure_database(
     """
     from google.protobuf.field_mask_pb2 import FieldMask
 
-    sp_role = f"{branch_path}/roles/{sp_client_id}"
+    sp_role = f"{branch_path}/roles/sp-{sp_client_id}"
     db_path = f"{branch_path}/databases/{database_id}"
 
     for db in w.postgres.list_databases(parent=branch_path):
