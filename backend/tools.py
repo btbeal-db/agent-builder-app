@@ -10,7 +10,6 @@ import json
 import logging
 from typing import Any
 
-from databricks.sdk import WorkspaceClient
 from databricks.sdk.service.dashboards import MessageStatus
 
 from .auth import get_data_client
@@ -185,102 +184,87 @@ def _make_uc_function_tools(config: dict[str, Any]) -> list[BaseTool]:
     return tools
 
 
-def _get_mcp_client(server_url: str):
-    """Create a ``DatabricksMCPClient`` with the right auth for the URL.
+def _get_mcp_token() -> str:
+    """Get a Bearer token for MCP calls.
 
-    * **Databricks Apps** (``*.databricksapps.com``) require OAuth.
-      ``DatabricksMCPClient`` checks ``config.oauth_token()`` and rejects
-      PAT-style clients.  We create an OAuth-compatible client from the
-      OBO token (Apps proxy) or SP credentials.
-    * **Managed MCP** (``/api/2.0/mcp/...``) works with any credential
-      (PAT, OBO, SP).
+    Same priority as every other data-access node (VS, Genie, UC):
+    PAT > OBO > SP.
     """
-    import os
-    from urllib.parse import urlparse
-    from databricks_mcp import DatabricksMCPClient
-
-    is_apps_url = urlparse(server_url).netloc.endswith(".databricksapps.com")
-
-    if is_apps_url:
-        from .auth import get_user_token, get_sp_workspace_client
-
-        # 1. OBO token from the Apps proxy — this IS an OAuth token, but
-        #    get_workspace_client() wraps it with auth_type="pat" (to avoid
-        #    SP credential contamination), which DatabricksMCPClient rejects.
-        #    Create the client without auth_type so the SDK auto-detects
-        #    bearer-token auth as OAuth-compatible.
-        obo_token = get_user_token()
-        host = os.environ.get("DATABRICKS_HOST", "")
-        if obo_token and host:
-            masked = {}
-            for key in ("DATABRICKS_CLIENT_ID", "DATABRICKS_CLIENT_SECRET"):
-                if key in os.environ:
-                    masked[key] = os.environ.pop(key)
-            try:
-                w = WorkspaceClient(host=host, token=obo_token)
-                return DatabricksMCPClient(server_url=server_url, workspace_client=w)
-            except (ValueError, RuntimeError):
-                pass
-            finally:
-                os.environ.update(masked)
-
-        # 2. SP credentials (OAuth client-credentials) — works if the SP
-        #    has been granted query permissions on the target app.
-        try:
-            return DatabricksMCPClient(
-                server_url=server_url,
-                workspace_client=get_sp_workspace_client(),
-            )
-        except (ValueError, RuntimeError):
-            pass
-
-        # 3. Serving OBO mode (ModelServingUserCredentials)
-        from .auth import get_auth_mode
-        if get_auth_mode() == "obo":
-            from databricks_ai_bridge import ModelServingUserCredentials
-            return DatabricksMCPClient(
-                server_url=server_url,
-                workspace_client=WorkspaceClient(
-                    credentials_strategy=ModelServingUserCredentials(),
-                ),
-            )
-
-    # Managed MCP or fallback — PAT > OBO > SP all work
-    return DatabricksMCPClient(server_url=server_url, workspace_client=get_data_client())
+    w = get_data_client()
+    headers = w.config.authenticate()
+    return headers["Authorization"].split("Bearer ", 1)[1]
 
 
 def _run_mcp_in_thread(fn, *args, **kwargs):
-    """Run a ``DatabricksMCPClient`` method in a dedicated thread.
+    """Run an async MCP operation in a dedicated thread.
 
-    ``DatabricksMCPClient.list_tools()`` and ``call_tool()`` call
-    ``asyncio.run()`` internally, which crashes if an event loop is
-    already running (e.g. inside a FastAPI handler).  Running in a
-    separate thread guarantees no existing event loop.
+    The MCP SDK uses ``asyncio.run()`` internally, which crashes if an
+    event loop is already running (e.g. inside a FastAPI handler).
+    Running in a separate thread guarantees no existing event loop.
     """
     import concurrent.futures
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
         return pool.submit(fn, *args, **kwargs).result()
 
 
-def _make_mcp_tools(config: dict[str, Any]) -> list[BaseTool]:
-    """Create LangChain tools from a Databricks MCP server.
+def _mcp_list_tools(server_url: str, token: str):
+    """Discover tools from an MCP server using the raw MCP SDK.
 
-    Uses ``DatabricksMCPClient`` which handles auth via the
-    ``WorkspaceClient``, auto-detects transport, and provides proper
-    Databricks resource declarations for deployment.
+    Bypasses ``DatabricksMCPClient`` which rejects PAT auth for Apps URLs.
+    PAT works fine as a Bearer token at the HTTP level.
+    """
+    import asyncio
+    import httpx
+    from mcp.client.streamable_http import streamablehttp_client
+    from mcp.client.session import ClientSession
+
+    async def _discover():
+        async with streamablehttp_client(
+            url=server_url,
+            headers={"Authorization": f"Bearer {token}"},
+        ) as (read, write, _):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                return (await session.list_tools()).tools
+
+    return asyncio.run(_discover())
+
+
+def _mcp_call_tool(server_url: str, token: str, tool_name: str, arguments: dict):
+    """Call a tool on an MCP server using the raw MCP SDK."""
+    import asyncio
+    from mcp.client.streamable_http import streamablehttp_client
+    from mcp.client.session import ClientSession
+
+    async def _call():
+        async with streamablehttp_client(
+            url=server_url,
+            headers={"Authorization": f"Bearer {token}"},
+        ) as (read, write, _):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                return await session.call_tool(tool_name, arguments)
+
+    return asyncio.run(_call())
+
+
+def _make_mcp_tools(config: dict[str, Any]) -> list[BaseTool]:
+    """Create LangChain tools from an MCP server.
+
+    Uses the user's PAT (via ``get_data_client()``) as a Bearer token,
+    same auth model as VS, Genie, and UC Function nodes.  Bypasses
+    ``DatabricksMCPClient`` which rejects PAT for Apps URLs.
     """
     server_url = config.get("server_url", "")
     if not server_url:
         logger.warning("MCP tool config missing server_url")
         return []
 
-    # Discover tools from the MCP server.
-    # Runs in a thread because DatabricksMCPClient uses asyncio.run()
-    # internally, which fails inside an existing event loop (FastAPI).
+    # Discover tools — runs in a thread to avoid event loop conflicts
     try:
-        mcp_client = _get_mcp_client(server_url)
-        mcp_tools = _run_mcp_in_thread(mcp_client.list_tools)
-    except Exception as exc:
+        token = _get_mcp_token()
+        mcp_tools = _run_mcp_in_thread(_mcp_list_tools, server_url, token)
+    except Exception:
         logger.exception("Failed to discover MCP tools from %s", server_url)
         return []
 
@@ -297,12 +281,12 @@ def _make_mcp_tools(config: dict[str, Any]) -> list[BaseTool]:
     sync_tools: list[BaseTool] = []
 
     for mcp_tool in mcp_tools:
-        # Each tool call creates a fresh client with current auth credentials,
-        # and runs in a thread to avoid event loop conflicts.
         def _make_fn(tool_name: str = mcp_tool.name) -> Any:
             def call_tool(**kwargs: Any) -> str:
-                client = _get_mcp_client(server_url)
-                result = _run_mcp_in_thread(client.call_tool, tool_name, kwargs)
+                tok = _get_mcp_token()  # fresh token per call
+                result = _run_mcp_in_thread(
+                    _mcp_call_tool, server_url, tok, tool_name, kwargs,
+                )
                 parts = [c.text for c in result.content if hasattr(c, "text")]
                 return "\n".join(parts) if parts else "(no output)"
             return call_tool
