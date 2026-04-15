@@ -977,7 +977,14 @@ def list_models():
         return ModelsResponse(models=[])
 
     base_path = status.experiment_path
-    host = os.environ.get("DATABRICKS_HOST", "").rstrip("/")
+    # DATABRICKS_HOST on Apps points to the app's own URL, not the workspace.
+    # Use the SP client's config to get the real workspace host.
+    try:
+        host = get_sp_workspace_client().config.host.rstrip("/")
+    except Exception:
+        host = os.environ.get("DATABRICKS_HOST", "").rstrip("/")
+    if host and not host.startswith("http"):
+        host = f"https://{host}"
 
     prev_uri = mlflow.get_tracking_uri()
     try:
