@@ -989,7 +989,7 @@ def list_models():
         models: list[ModelInfo] = []
         for exp in experiments:
             name = exp.name.rsplit("/", 1)[-1]
-            exp_url = f"{host}/#/ml/experiments/{exp.experiment_id}" if host else ""
+            exp_url = f"{host}/ml/experiments/{exp.experiment_id}" if host else ""
 
             info = ModelInfo(
                 name=name,
