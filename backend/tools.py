@@ -184,12 +184,28 @@ def _make_uc_function_tools(config: dict[str, Any]) -> list[BaseTool]:
     return tools
 
 
-def _get_mcp_token() -> str:
+def _get_mcp_token(server_url: str) -> str:
     """Get a Bearer token for MCP calls.
 
-    Same priority as every other data-access node (VS, Genie, UC):
-    PAT > OBO > SP.
+    For **managed MCP** (``/api/2.0/mcp/...``): same priority as VS/Genie/UC
+    — PAT > OBO > SP.  PATs work for workspace API endpoints.
+
+    For **Databricks Apps** (``*.databricksapps.com``): Apps reject PATs and
+    require OAuth.  We prefer the OBO token (OAuth, from the Apps proxy) or
+    SP credentials, then fall back to PAT for non-Apps cases.
     """
+    from urllib.parse import urlparse
+    from .auth import get_user_token, get_user_pat
+
+    is_apps_url = urlparse(server_url).netloc.endswith(".databricksapps.com")
+
+    if is_apps_url:
+        # OBO token IS OAuth and works for Apps (verified via curl)
+        obo = get_user_token()
+        if obo:
+            return obo
+        # Fall through to get_data_client() which tries PAT > OBO > SP
+
     w = get_data_client()
     headers = w.config.authenticate()
     return headers["Authorization"].split("Bearer ", 1)[1]
@@ -262,7 +278,7 @@ def _make_mcp_tools(config: dict[str, Any]) -> list[BaseTool]:
 
     # Discover tools — runs in a thread to avoid event loop conflicts
     try:
-        token = _get_mcp_token()
+        token = _get_mcp_token(server_url)
         mcp_tools = _run_mcp_in_thread(_mcp_list_tools, server_url, token)
     except Exception:
         logger.exception("Failed to discover MCP tools from %s", server_url)
