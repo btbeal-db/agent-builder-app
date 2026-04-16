@@ -184,51 +184,101 @@ def _make_uc_function_tools(config: dict[str, Any]) -> list[BaseTool]:
     return tools
 
 
-def _run_mcp_in_thread(fn, *args, **kwargs):
-    """Run an MCP operation in a dedicated thread.
+def _get_mcp_token(server_url: str) -> str:
+    """Get a Bearer token for MCP calls.
 
-    ``DatabricksMultiServerMCPClient.get_tools()`` and the returned tools'
-    ``ainvoke()`` use ``asyncio.run()`` internally, which crashes inside an
-    existing event loop (FastAPI).  Running in a separate thread avoids this.
+    Same credential priority as VS, Genie, and UC Function nodes:
+    PAT > OBO > SP (via ``get_data_client()``).
+
+    For Databricks Apps URLs the OBO token from the Apps proxy is
+    preferred because it is an OAuth token that Apps accept reliably.
+    The PAT from the banner is used as a fallback.
+    """
+    from urllib.parse import urlparse
+    from .auth import get_user_token
+
+    # On the deployed app, the OBO token (OAuth) is the most reliable
+    # credential for Apps URLs.  Try it first before the general path.
+    if urlparse(server_url).netloc.endswith(".databricksapps.com"):
+        obo = get_user_token()
+        if obo:
+            return obo
+
+    # General path: PAT > OBO > SP
+    w = get_data_client()
+    headers = w.config.authenticate()
+    return headers["Authorization"].split("Bearer ", 1)[1]
+
+
+def _run_mcp_in_thread(fn, *args, **kwargs):
+    """Run an async MCP operation in a dedicated thread.
+
+    The MCP SDK uses ``asyncio.run()`` internally, which crashes if an
+    event loop is already running (e.g. inside a FastAPI handler).
+    Running in a separate thread guarantees no existing event loop.
     """
     import concurrent.futures
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
         return pool.submit(fn, *args, **kwargs).result()
 
 
+def _mcp_list_tools(server_url: str, token: str):
+    """Discover tools from an MCP server using the raw MCP SDK.
+
+    Bypasses ``DatabricksMCPClient`` which rejects PAT auth for Apps URLs.
+    PAT works fine as a Bearer token at the HTTP level.
+    """
+    import asyncio
+    import httpx
+    from mcp.client.streamable_http import streamablehttp_client
+    from mcp.client.session import ClientSession
+
+    async def _discover():
+        async with streamablehttp_client(
+            url=server_url,
+            headers={"Authorization": f"Bearer {token}"},
+        ) as (read, write, _):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                return (await session.list_tools()).tools
+
+    return asyncio.run(_discover())
+
+
+def _mcp_call_tool(server_url: str, token: str, tool_name: str, arguments: dict):
+    """Call a tool on an MCP server using the raw MCP SDK."""
+    import asyncio
+    from mcp.client.streamable_http import streamablehttp_client
+    from mcp.client.session import ClientSession
+
+    async def _call():
+        async with streamablehttp_client(
+            url=server_url,
+            headers={"Authorization": f"Bearer {token}"},
+        ) as (read, write, _):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                return await session.call_tool(tool_name, arguments)
+
+    return asyncio.run(_call())
+
+
 def _make_mcp_tools(config: dict[str, Any]) -> list[BaseTool]:
     """Create LangChain tools from an MCP server.
 
-    Uses ``DatabricksMultiServerMCPClient`` / ``DatabricksMCPServer`` from
-    ``databricks_langchain`` — the official SDK for MCP in agents.  Auth is
-    handled by passing ``get_data_client()`` as the ``workspace_client``,
-    which follows the standard PAT > OBO > SP priority.
-
-    The SDK returns async-only tools.  We wrap each with a sync adapter
-    because the LLM node's tool-calling loop uses ``tool.invoke()`` (sync).
+    Uses the user's PAT (via ``get_data_client()``) as a Bearer token,
+    same auth model as VS, Genie, and UC Function nodes.  Bypasses
+    ``DatabricksMCPClient`` which rejects PAT for Apps URLs.
     """
-    import asyncio
-    from databricks_langchain import DatabricksMCPServer, DatabricksMultiServerMCPClient
-
     server_url = config.get("server_url", "")
     if not server_url:
         logger.warning("MCP tool config missing server_url")
         return []
 
-    def _discover():
-        w = get_data_client()
-        client = DatabricksMultiServerMCPClient([
-            DatabricksMCPServer(
-                name="mcp",
-                url=server_url,
-                workspace_client=w,
-            ),
-        ])
-        return asyncio.run(client.get_tools())
-
     # Discover tools — runs in a thread to avoid event loop conflicts
     try:
-        mcp_tools = _run_mcp_in_thread(_discover)
+        token = _get_mcp_token(server_url)
+        mcp_tools = _run_mcp_in_thread(_mcp_list_tools, server_url, token)
     except Exception:
         logger.exception("Failed to discover MCP tools from %s", server_url)
         return []
@@ -246,25 +296,14 @@ def _make_mcp_tools(config: dict[str, Any]) -> list[BaseTool]:
     sync_tools: list[BaseTool] = []
 
     for mcp_tool in mcp_tools:
-        # The SDK returns async-only StructuredTools. Wrap each with a
-        # sync function that calls ainvoke() in a thread.
-        def _make_fn(async_tool: BaseTool = mcp_tool) -> Any:
+        def _make_fn(tool_name: str = mcp_tool.name) -> Any:
             def call_tool(**kwargs: Any) -> str:
-                def _invoke():
-                    import asyncio
-                    result = asyncio.run(async_tool.ainvoke(kwargs))
-                    # ainvoke returns content blocks or a string
-                    if isinstance(result, str):
-                        return result
-                    if isinstance(result, list):
-                        parts = [
-                            b.get("text", "") if isinstance(b, dict) else str(b)
-                            for b in result
-                            if not isinstance(b, dict) or b.get("type") == "text"
-                        ]
-                        return "\n".join(p for p in parts if p) or str(result)
-                    return str(result)
-                return _run_mcp_in_thread(_invoke)
+                tok = _get_mcp_token(server_url)  # fresh token per call
+                result = _run_mcp_in_thread(
+                    _mcp_call_tool, server_url, tok, tool_name, kwargs,
+                )
+                parts = [c.text for c in result.content if hasattr(c, "text")]
+                return "\n".join(parts) if parts else "(no output)"
             return call_tool
 
         desc = mcp_tool.description or ""
@@ -275,7 +314,7 @@ def _make_mcp_tools(config: dict[str, Any]) -> list[BaseTool]:
             StructuredTool(
                 name=mcp_tool.name,
                 description=desc,
-                args_schema=mcp_tool.args_schema,
+                args_schema=mcp_tool.inputSchema,
                 func=_make_fn(),
             )
         )

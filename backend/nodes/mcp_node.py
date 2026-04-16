@@ -96,30 +96,14 @@ class MCPServerNode(BaseNode):
         query = resolve_state(state, config.get("query_from", "input"))
 
         try:
-            import asyncio
-            from databricks_langchain import DatabricksMCPServer, DatabricksMultiServerMCPClient
-            from ..auth import get_data_client
-            from ..tools import _run_mcp_in_thread
+            from ..tools import _get_mcp_token, _mcp_call_tool, _run_mcp_in_thread
 
-            def _call():
-                w = get_data_client()
-                client = DatabricksMultiServerMCPClient([
-                    DatabricksMCPServer(name="mcp", url=server_url, workspace_client=w),
-                ])
-                tools = asyncio.run(client.get_tools())
-                tool_fn = next((t for t in tools if t.name == tool_name), None)
-                if not tool_fn:
-                    available = [t.name for t in tools]
-                    return f"Tool '{tool_name}' not found. Available: {available}"
-                return asyncio.run(tool_fn.ainvoke({"query": str(query)}))
-
-            result = _run_mcp_in_thread(_call)
-            if isinstance(result, list):
-                parts = [b.get("text", "") if isinstance(b, dict) else str(b) for b in result
-                         if not isinstance(b, dict) or b.get("type") == "text"]
-                result_text = "\n".join(p for p in parts if p) or str(result)
-            else:
-                result_text = str(result)
+            token = _get_mcp_token(server_url)
+            result = _run_mcp_in_thread(
+                _mcp_call_tool, server_url, token, tool_name, {"query": str(query)},
+            )
+            parts = [c.text for c in result.content if hasattr(c, "text")]
+            result_text = "\n".join(parts) if parts else "(no output)"
 
         except Exception as exc:
             logger.exception("MCP tool call failed (server=%s, tool=%s)", server_url, tool_name)
