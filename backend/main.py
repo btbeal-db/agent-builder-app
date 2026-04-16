@@ -29,6 +29,7 @@ from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from mlflow.models.auth_policy import AuthPolicy, SystemAuthPolicy, UserAuthPolicy
 from mlflow.models.resources import (
+    DatabricksApp,
     DatabricksFunction,
     DatabricksGenieSpace,
     DatabricksServingEndpoint,
@@ -188,15 +189,15 @@ def _extract_resources(graph: GraphDef) -> list:
             logger.warning("Could not resolve Genie room %s dependencies: %s", room_id, exc)
 
     # Resolve MCP server resources.
-    # DatabricksMCPClient.get_databricks_resources() parses the MCP URL to
-    # determine the resource type (UC functions, VS indexes, Genie spaces,
-    # UC connections) and returns the corresponding MLflow resource objects.
-    # This runs in a thread because get_databricks_resources() calls
-    # list_tools() which uses asyncio.run() — incompatible with the
-    # FastAPI event loop on the calling thread.
+    # For managed MCP URLs, DatabricksMCPClient.get_databricks_resources()
+    # parses the URL to determine resource types (UC functions, VS indexes,
+    # Genie spaces, UC connections).
+    # For Databricks Apps URLs, declare a DatabricksApp resource so that
+    # automatic passthrough provisions credentials for the app.
     mcp_urls = _collect_mcp_urls(graph)
     if mcp_urls:
         import concurrent.futures
+        from urllib.parse import urlparse
         from databricks_mcp import DatabricksMCPClient
 
         try:
@@ -206,6 +207,17 @@ def _extract_resources(graph: GraphDef) -> list:
             w = WorkspaceClient()
 
         def _resolve_mcp(url: str) -> list:
+            # Databricks Apps URLs: declare as DatabricksApp resource
+            parsed = urlparse(url)
+            if parsed.netloc.endswith(".databricksapps.com"):
+                # Extract app name from URL: <app-name>-<workspace-id>.aws.databricksapps.com
+                app_host = parsed.netloc.split(".")[0]  # e.g. "weather-mcp-server-7474650376786944"
+                # Remove the workspace ID suffix to get the app name
+                parts = app_host.rsplit("-", 1)
+                app_name = parts[0] if len(parts) > 1 and parts[1].isdigit() else app_host
+                return [DatabricksApp(app_name)]
+
+            # Managed MCP URLs: use DatabricksMCPClient to resolve resources
             try:
                 client = DatabricksMCPClient(server_url=url, workspace_client=w)
                 return client.get_databricks_resources()
