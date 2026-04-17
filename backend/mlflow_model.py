@@ -22,6 +22,7 @@ from mlflow.types.responses import (
     ResponsesAgentRequest,
     ResponsesAgentResponse,
     ResponsesAgentStreamEvent,
+    create_text_delta,
 )
 
 if TYPE_CHECKING:
@@ -329,19 +330,64 @@ class AgentGraphModel(ResponsesAgent):
     def predict_stream(
         self, request: ResponsesAgentRequest
     ) -> Generator[ResponsesAgentStreamEvent, None, None]:
-        """Wrap predict() as a stream of ResponsesAgent events."""
-        response = self.predict(request)
-        output_item = response.output[0]
-        full_text = output_item["content"][0]["text"]
-        msg_id = output_item["id"]
+        """Stream the agent graph, yielding token-level deltas from LLM nodes."""
+        from langchain_core.messages import AIMessage, AIMessageChunk
 
-        yield ResponsesAgentStreamEvent(
-            type="response.output_text.delta",
-            delta=full_text,
-            item_id=msg_id,
-            output_index=0,
-            content_index=0,
-        )
+        user_message = _extract_user_message(request)
+        if not user_message:
+            yield ResponsesAgentStreamEvent(
+                **create_text_delta("No user message provided.", _make_msg_id())
+            )
+            return
+
+        thread_id = _get_thread_id(request)
+        config = _build_config(self.checkpointer, thread_id)
+        invoke_input = self._resolve_invoke_input(user_message, config)
+
+        msg_id = _make_msg_id()
+        resp_id = _make_resp_id()
+        streamed_parts: list[str] = []
+
+        for msg, metadata in self.compiled_graph.stream(
+            invoke_input, config=config, stream_mode="messages",
+        ):
+            # Only stream AI message content chunks (skip tool calls)
+            if isinstance(msg, (AIMessage, AIMessageChunk)):
+                if msg.content and not getattr(msg, "tool_calls", None):
+                    text = str(msg.content)
+                    streamed_parts.append(text)
+                    yield ResponsesAgentStreamEvent(
+                        **create_text_delta(text, msg_id)
+                    )
+
+        full_text = "".join(streamed_parts)
+
+        # If nothing was streamed (e.g. interrupt, structured output, or
+        # non-LLM-only graphs), fall back to invoke + filter_output.
+        if not full_text:
+            result = self.compiled_graph.invoke(invoke_input, config=config)
+            interrupts = result.get("__interrupt__")
+            if interrupts:
+                full_text = str(interrupts[0].value)
+            else:
+                full_text, _ = filter_output(result, self.graph_def)
+                if not full_text:
+                    messages = result.get("messages", [])
+                    for m in reversed(messages):
+                        if isinstance(m, AIMessage) and m.content:
+                            full_text = m.content
+                            break
+            yield ResponsesAgentStreamEvent(
+                **create_text_delta(str(full_text), msg_id)
+            )
+
+        # Emit completion events
+        output_item = {
+            "id": msg_id,
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": full_text}],
+        }
 
         yield ResponsesAgentStreamEvent(
             type="response.output_item.done",
@@ -350,7 +396,10 @@ class AgentGraphModel(ResponsesAgent):
 
         yield ResponsesAgentStreamEvent(
             type="response.completed",
-            response=response.model_dump(),
+            response=ResponsesAgentResponse(
+                id=resp_id,
+                output=[output_item],
+            ).model_dump(),
         )
 
 
