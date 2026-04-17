@@ -92,7 +92,10 @@ def _serialize_messages(messages: list) -> list[dict]:
     return result
 
 
-def _extract_resources(graph: GraphDef) -> list:
+def _extract_resources(
+    graph: GraphDef,
+    client: "WorkspaceClient | None" = None,
+) -> list:
     """Extract Databricks resource declarations from all nodes in the graph.
 
     Maps node config fields to the appropriate MLflow resource types so that
@@ -105,6 +108,13 @@ def _extract_resources(graph: GraphDef) -> list:
     For Genie spaces, also discovers and declares downstream dependencies
     (tables and SQL warehouse) by querying the Genie API, as required by
     the automatic auth passthrough docs.
+
+    Args:
+        graph: The graph definition to extract resources from.
+        client: Optional WorkspaceClient for resolving Genie/MCP downstream
+            dependencies.  Pass a PAT-authenticated client during deploy so
+            the resolution uses the user's credentials rather than the app SP
+            (which may lack permission to read Genie room metadata).
     """
     resources = []
     seen: set[tuple[str, str]] = set()
@@ -162,12 +172,15 @@ def _extract_resources(graph: GraphDef) -> list:
     # The auth passthrough docs require these to be explicitly declared.
     for room_id in genie_room_ids:
         try:
-            # Use SP client on the app, fall back to default for local deploys
-            try:
-                w = get_sp_workspace_client()
-            except RuntimeError:
-                from databricks.sdk import WorkspaceClient
-                w = WorkspaceClient()
+            # Prefer the caller-provided client (user PAT during deploy) so
+            # we can read Genie room metadata.  Fall back to SP → default.
+            w = client
+            if not w:
+                try:
+                    w = get_sp_workspace_client()
+                except RuntimeError:
+                    from databricks.sdk import WorkspaceClient
+                    w = WorkspaceClient()
             space = w.genie.get_space(room_id, include_serialized_space=True)
 
             # SQL warehouse
@@ -199,16 +212,18 @@ def _extract_resources(graph: GraphDef) -> list:
         import concurrent.futures
         from databricks_mcp import DatabricksMCPClient
 
-        try:
-            w = get_sp_workspace_client()
-        except RuntimeError:
-            from databricks.sdk import WorkspaceClient
-            w = WorkspaceClient()
+        w_mcp = client
+        if not w_mcp:
+            try:
+                w_mcp = get_sp_workspace_client()
+            except RuntimeError:
+                from databricks.sdk import WorkspaceClient
+                w_mcp = WorkspaceClient()
 
         def _resolve_mcp(url: str) -> list:
             try:
-                client = DatabricksMCPClient(server_url=url, workspace_client=w)
-                return client.get_databricks_resources()
+                mcp_client = DatabricksMCPClient(server_url=url, workspace_client=w_mcp)
+                return mcp_client.get_databricks_resources()
             except Exception as exc:
                 logger.warning("Could not resolve MCP resources for %s: %s", url, exc)
                 return []
@@ -248,48 +263,68 @@ def _collect_mcp_urls(graph: GraphDef) -> list[str]:
     return urls
 
 
-def _build_auth_policy(graph: GraphDef) -> AuthPolicy:
+def _build_auth_policy(
+    graph: GraphDef,
+    client: "WorkspaceClient | None" = None,
+) -> AuthPolicy:
     """Build an AuthPolicy for OBO (on-behalf-of) deployment.
 
-    LLM serving endpoints go into SystemAuthPolicy (FMAPI rejects user tokens).
-    Data-access resources (VS, Genie, UC Functions) are represented as
-    UserAuthPolicy scopes so the served model acts as the calling user.
+    Classification follows the Databricks agent auth docs:
+
+    **SystemAuthPolicy.resources** — resources the endpoint's SP needs:
+      - LLM serving endpoints (FMAPI rejects user tokens)
+      - Genie spaces + their downstream SQL warehouses and tables
+
+    **UserAuthPolicy.api_scopes** — OAuth scopes for the user's token:
+      - ``vector-search`` for VS index queries
+      - ``genie`` for Genie API calls on behalf of the user
+      - ``sql`` / ``unity-catalog`` for UC functions
+
+    ``_extract_resources()`` resolves all resources (including Genie
+    downstream dependencies); this function then classifies each one as
+    system vs. user-scoped.
+
+    Args:
+        graph: The graph definition.
+        client: Optional WorkspaceClient (PAT-authenticated) for resolving
+            Genie/MCP downstream dependencies.
     """
-    system_resources = []
+    # Resolve every resource the graph touches (Genie downstream deps, MCP,
+    # etc.) — same list used for passthrough mode.
+    all_resources = _extract_resources(graph, client=client)
+
+    # Classify: system SP resources vs. user-scoped resources.
+    # Per the docs, LLM endpoints / Genie spaces / SQL warehouses / tables
+    # go into system auth; VS indexes and UC functions are user-scoped.
+    _SYSTEM_TYPES = (
+        DatabricksServingEndpoint,
+        DatabricksGenieSpace,
+        DatabricksSQLWarehouse,
+        DatabricksTable,
+    )
+    system_resources = [r for r in all_resources if isinstance(r, _SYSTEM_TYPES)]
+
+    # Determine user scopes by scanning node configs.
     user_scopes: set[str] = set()
-    seen_endpoints: set[str] = set()
 
     def _scan_config(config: dict, tool_type: str | None = None) -> None:
-        # LLM endpoints → system auth
-        endpoint = config.get("endpoint")
-        if endpoint and endpoint not in seen_endpoints:
-            seen_endpoints.add(endpoint)
-            system_resources.append(DatabricksServingEndpoint(endpoint_name=endpoint))
-
-        # VS → user scope
         if config.get("index_name"):
             user_scopes.add("vector-search")
 
-        # Genie → user scopes
         if config.get("room_id"):
             user_scopes.add("genie")
-            user_scopes.add("sql")
-            user_scopes.add("model-serving")
 
-        # UC Functions → user scope
         if config.get("function_name"):
             user_scopes.add("sql")
             user_scopes.add("unity-catalog")
 
-        # MCP servers → scopes depend on MCP type (UC functions, VS, Genie, etc.)
-        # Add broad scopes since the MCP server may access multiple resource types.
+        # MCP servers may access multiple resource types.
         if config.get("server_url") and tool_type == "mcp_server":
-            user_scopes.update(["unity-catalog", "vector-search", "sql", "model-serving"])
+            user_scopes.update(["unity-catalog", "vector-search", "sql", "genie"])
 
     for node in graph.nodes:
         _scan_config(node.config, tool_type=node.type)
 
-        # Tools attached to LLM nodes via tools_json
         tools_json_raw = node.config.get("tools_json", "")
         if tools_json_raw and str(tools_json_raw).strip():
             try:
@@ -820,14 +855,16 @@ def deploy_graph(req: DeployRequest):
                     "--python-version 3.11"
                 )
 
-            # Build resource declarations based on auth mode:
-            # - OBO: auth_policy with system resources (LLM) + user scopes (VS, Genie, UC)
-            # - Passthrough: resources list with system SP access to everything
+            # Build resource declarations based on auth mode.
+            # Both paths need a PAT client to resolve Genie downstream
+            # dependencies (tables + SQL warehouse) — the SP typically
+            # lacks permission to read Genie room metadata.
+            res_client = create_pat_client(req.pat) if req.pat else None
             if req.auth_mode == AuthMode.OBO:
-                auth_policy = _build_auth_policy(req.graph)
+                auth_policy = _build_auth_policy(req.graph, client=res_client)
                 resource_kwargs = {"auth_policy": auth_policy}
             else:
-                resources = _extract_resources(req.graph)
+                resources = _extract_resources(req.graph, client=res_client)
                 resource_kwargs = {"resources": resources if resources else None}
 
             run = mlflow.start_run()
