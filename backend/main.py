@@ -270,18 +270,30 @@ def _persist_mcp_tool_metadata(graph: GraphDef, pat: str = "") -> None:
     and never needs to re-contact the MCP server for discovery.  Mutates
     the graph in place (caller should pass a deep copy).
 
-    Uses the user's PAT for discovery (same credential that works during
-    preview).  Falls back to SP if no PAT is provided.
+    Uses a PAT-authenticated WorkspaceClient for discovery (same credential
+    that works during preview).  Falls back to SP if no PAT is provided.
     """
-    from .tools import discover_mcp_tool_metadata, _get_mcp_token
+    from .tools import discover_mcp_tool_metadata
+
+    # Build a WorkspaceClient for MCP discovery
+    pat_client = create_pat_client(pat) if pat else None
+
+    def _discover(url: str) -> list:
+        client = pat_client
+        if not client:
+            try:
+                client = get_sp_workspace_client()
+            except RuntimeError:
+                from databricks.sdk import WorkspaceClient as WC
+                client = WC()
+        return discover_mcp_tool_metadata(url, client)
 
     for node in graph.nodes:
         # Standalone MCP nodes (not attached as tools)
         if node.type == "mcp_server" and node.config.get("server_url"):
             url = node.config["server_url"]
             try:
-                token = pat or _get_mcp_token(url)
-                metadata = discover_mcp_tool_metadata(url, token)
+                metadata = _discover(url)
                 node.config["discovered_tools"] = metadata
                 logger.info("Persisted %d MCP tools for standalone node %s (%s)",
                             len(metadata), node.id, url)
@@ -310,8 +322,7 @@ def _persist_mcp_tool_metadata(graph: GraphDef, pat: str = "") -> None:
             if not url:
                 continue
             try:
-                token = pat or _get_mcp_token(url)
-                metadata = discover_mcp_tool_metadata(url, token)
+                metadata = _discover(url)
                 tc_config["discovered_tools"] = metadata
                 modified = True
                 logger.info("Persisted %d MCP tools for LLM-attached tool on node %s (%s)",

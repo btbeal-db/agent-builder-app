@@ -81,15 +81,15 @@ class TestMakeMCPToolsPersistedPath:
         assert tools[1].name == "get_schema"
 
     @patch("backend.tools._run_mcp_in_thread")
-    @patch("backend.tools._get_mcp_token")
-    def test_persisted_skips_discovery(self, mock_token, mock_thread):
+    @patch("backend.tools._get_mcp_client")
+    def test_persisted_skips_discovery(self, mock_client, mock_thread):
         """Live discovery helpers should NOT be called when persisted tools exist."""
         config = {
             "server_url": "https://workspace.databricks.com/api/2.0/mcp/functions/cat/schema",
             "discovered_tools": FAKE_PERSISTED,
         }
         _make_mcp_tools(config)
-        mock_token.assert_not_called()
+        mock_client.assert_not_called()
         mock_thread.assert_not_called()
 
     def test_tool_filter_applied_to_persisted(self):
@@ -139,19 +139,21 @@ class TestMakeMCPToolsLiveDiscovery:
     """When discovered_tools is absent, fall back to live discovery."""
 
     @patch("backend.tools._run_mcp_in_thread", return_value=FAKE_MCP_TOOLS)
-    @patch("backend.tools._get_mcp_token", return_value="fake-token")
-    def test_live_discovery_when_no_persisted(self, mock_token, mock_thread):
+    @patch("backend.tools._get_mcp_client")
+    def test_live_discovery_when_no_persisted(self, mock_client, mock_thread):
+        mock_client.return_value = MagicMock()
         config = {
             "server_url": "https://workspace.databricks.com/api/2.0/mcp/functions/cat/schema",
         }
         tools = _make_mcp_tools(config)
         assert len(tools) == 2
-        mock_token.assert_called()
+        mock_client.assert_called()
         mock_thread.assert_called()
 
     @patch("backend.tools._run_mcp_in_thread", side_effect=Exception("connection refused"))
-    @patch("backend.tools._get_mcp_token", return_value="fake-token")
-    def test_live_discovery_failure_returns_empty(self, mock_token, mock_thread):
+    @patch("backend.tools._get_mcp_client")
+    def test_live_discovery_failure_returns_empty(self, mock_client, mock_thread):
+        mock_client.return_value = MagicMock()
         config = {
             "server_url": "https://workspace.databricks.com/api/2.0/mcp/functions/cat/schema",
         }
@@ -173,7 +175,7 @@ class TestDiscoverMCPToolMetadata:
     def test_returns_serializable_dicts(self, mock_thread):
         result = discover_mcp_tool_metadata(
             "https://workspace.databricks.com/api/2.0/mcp/functions/cat/schema",
-            token="fake-token",
+            client=MagicMock(),
         )
         assert len(result) == 2
         assert result[0]["name"] == "search_docs"
@@ -183,7 +185,7 @@ class TestDiscoverMCPToolMetadata:
         json.dumps(result)
 
     def test_empty_url_returns_empty(self):
-        result = discover_mcp_tool_metadata("", token="fake-token")
+        result = discover_mcp_tool_metadata("", client=MagicMock())
         assert result == []
 
 
@@ -236,8 +238,8 @@ class TestPersistMCPToolMetadata:
     """Test the deploy-time injection of discovered_tools into graph_def."""
 
     @patch("backend.tools._run_mcp_in_thread", return_value=FAKE_MCP_TOOLS)
-    @patch("backend.tools._get_mcp_token", return_value="fake-token")
-    def test_injects_into_standalone_mcp_node(self, mock_token, mock_thread):
+    @patch("backend.main.create_pat_client", return_value=MagicMock())
+    def test_injects_into_standalone_mcp_node(self, mock_pat_client, mock_thread):
         from backend.main import _persist_mcp_tool_metadata
 
         graph = GraphDef(
@@ -263,8 +265,8 @@ class TestPersistMCPToolMetadata:
         assert discovered[0]["name"] == "search_docs"
 
     @patch("backend.tools._run_mcp_in_thread", return_value=FAKE_MCP_TOOLS)
-    @patch("backend.tools._get_mcp_token", return_value="fake-token")
-    def test_injects_into_llm_tools_json(self, mock_token, mock_thread):
+    @patch("backend.main.create_pat_client", return_value=MagicMock())
+    def test_injects_into_llm_tools_json(self, mock_pat_client, mock_thread):
         from backend.main import _persist_mcp_tool_metadata
 
         tools_json = json.dumps([{
@@ -298,8 +300,8 @@ class TestPersistMCPToolMetadata:
         assert len(mcp_config["discovered_tools"]) == 2
 
     @patch("backend.tools._run_mcp_in_thread", side_effect=Exception("timeout"))
-    @patch("backend.tools._get_mcp_token", return_value="fake-token")
-    def test_discovery_failure_does_not_crash(self, mock_token, mock_thread):
+    @patch("backend.main.create_pat_client", return_value=MagicMock())
+    def test_discovery_failure_does_not_crash(self, mock_pat_client, mock_thread):
         """Deploy should continue even if MCP discovery fails."""
         from backend.main import _persist_mcp_tool_metadata
 
@@ -323,7 +325,8 @@ class TestPersistMCPToolMetadata:
         # discovered_tools should NOT be present since discovery failed
         assert "discovered_tools" not in graph.nodes[0].config
 
-    def test_non_mcp_nodes_untouched(self):
+    @patch("backend.main.create_pat_client", return_value=MagicMock())
+    def test_non_mcp_nodes_untouched(self, mock_pat_client):
         from backend.main import _persist_mcp_tool_metadata
 
         graph = GraphDef(

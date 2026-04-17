@@ -21,6 +21,9 @@ from langchain_core.tools import BaseTool, StructuredTool, tool
 from mcp.client.session import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
+from databricks.sdk import WorkspaceClient
+from databricks_mcp import DatabricksOAuthClientProvider
+
 from .auth import get_data_client, get_user_token
 
 logger = logging.getLogger(__name__)
@@ -191,8 +194,8 @@ def _make_uc_function_tools(config: dict[str, Any]) -> list[BaseTool]:
 # ── MCP helpers ──────────────────────────────────────────────────────────────
 
 
-def _get_mcp_token(server_url: str) -> str:
-    """Get a Bearer token for MCP calls.
+def _get_mcp_client(server_url: str) -> WorkspaceClient:
+    """Return a WorkspaceClient for MCP server communication.
 
     Same credential priority as VS, Genie, and UC Function nodes:
     PAT > OBO > SP (via ``get_data_client()``).
@@ -200,12 +203,21 @@ def _get_mcp_token(server_url: str) -> str:
     For Databricks Apps URLs the OBO token from the Apps proxy is
     preferred because it is an OAuth token that Apps accept reliably.
     """
+    import os
+    from .auth import create_pat_client
+
     if urlparse(server_url).netloc.endswith(".databricksapps.com"):
         obo = get_user_token()
         if obo:
-            return obo
+            host = os.environ.get("DATABRICKS_HOST", "")
+            return WorkspaceClient(host=host, token=obo, auth_type="pat")
 
-    w = get_data_client()
+    return get_data_client()
+
+
+def _get_mcp_token(server_url: str) -> str:
+    """Get a Bearer token for MCP calls (used by deploy-time discovery)."""
+    w = _get_mcp_client(server_url)
     headers = w.config.authenticate()
     return headers["Authorization"].split("Bearer ", 1)[1]
 
@@ -221,23 +233,24 @@ def _run_mcp_in_thread(fn, *args, **kwargs):
         return pool.submit(fn, *args, **kwargs).result()
 
 
-def _mcp_session(server_url: str, token: str):
+def _mcp_session(server_url: str, client: WorkspaceClient):
     """Open an authenticated MCP session via Streamable HTTP.
 
-    Uses the raw MCP SDK rather than ``DatabricksMCPClient`` because the
-    latter rejects PAT auth for Databricks Apps URLs.
+    Uses ``DatabricksOAuthClientProvider`` for proper OAuth auth,
+    which is required by the Databricks MCP proxy (especially for
+    external MCP connections).
     """
     return streamablehttp_client(
         url=server_url,
-        headers={"Authorization": f"Bearer {token}"},
+        auth=DatabricksOAuthClientProvider(client),
     )
 
 
-def _mcp_list_tools(server_url: str, token: str):
+def _mcp_list_tools(server_url: str, client: WorkspaceClient):
     """Discover tools from an MCP server."""
 
     async def _discover():
-        async with _mcp_session(server_url, token) as (read, write, _):
+        async with _mcp_session(server_url, client) as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 return (await session.list_tools()).tools
@@ -245,11 +258,11 @@ def _mcp_list_tools(server_url: str, token: str):
     return asyncio.run(_discover())
 
 
-def _mcp_call_tool(server_url: str, token: str, tool_name: str, arguments: dict):
+def _mcp_call_tool(server_url: str, client: WorkspaceClient, tool_name: str, arguments: dict):
     """Call a tool on an MCP server."""
 
     async def _call():
-        async with _mcp_session(server_url, token) as (read, write, _):
+        async with _mcp_session(server_url, client) as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 return await session.call_tool(tool_name, arguments)
@@ -259,7 +272,7 @@ def _mcp_call_tool(server_url: str, token: str, tool_name: str, arguments: dict)
 
 def discover_mcp_tool_metadata(
     server_url: str,
-    token: str | None = None,
+    client: WorkspaceClient | None = None,
 ) -> list[dict[str, Any]]:
     """Discover MCP tools and return their metadata as serializable dicts.
 
@@ -268,15 +281,15 @@ def discover_mcp_tool_metadata(
     the MCP server.  This is called at deploy time to persist tool
     metadata in the graph artifact.
 
-    If *token* is not provided, one is obtained via ``_get_mcp_token``.
+    If *client* is not provided, one is obtained via ``_get_mcp_client``.
     """
     if not server_url:
         return []
 
-    if token is None:
-        token = _get_mcp_token(server_url)
+    if client is None:
+        client = _get_mcp_client(server_url)
 
-    mcp_tools = _run_mcp_in_thread(_mcp_list_tools, server_url, token)
+    mcp_tools = _run_mcp_in_thread(_mcp_list_tools, server_url, client)
     return [
         {
             "name": t.name,
@@ -297,10 +310,8 @@ def _make_mcp_tools(config: dict[str, Any]) -> list[BaseTool]:
     failures caused by network/auth differences in the serving env.
 
     **Live discovery path** (preview): falls back to connecting to the
-    MCP server at execution time.  Uses the user's PAT (via
-    ``get_data_client()``) as a Bearer token, same auth model as VS,
-    Genie, and UC Function nodes.  Bypasses ``DatabricksMCPClient``
-    which rejects PAT for Apps URLs.
+    MCP server at execution time.  Uses ``DatabricksOAuthClientProvider``
+    for proper OAuth auth as required by the Databricks MCP proxy.
     """
     server_url = config.get("server_url", "")
     if not server_url:
@@ -320,11 +331,11 @@ def _make_mcp_tools(config: dict[str, Any]) -> list[BaseTool]:
         last_err: Exception | None = None
         for attempt in range(2):
             try:
-                token = _get_mcp_token(server_url)
+                client = _get_mcp_client(server_url)
                 if attempt == 0:
-                    logger.info("MCP token obtained for %s (length=%d, prefix=%s)",
-                                server_url, len(token), token[:10])
-                mcp_tools = _run_mcp_in_thread(_mcp_list_tools, server_url, token)
+                    logger.info("MCP client obtained for %s (auth_type=%s)",
+                                server_url, client.config.auth_type)
+                mcp_tools = _run_mcp_in_thread(_mcp_list_tools, server_url, client)
                 break
             except Exception as exc:
                 last_err = exc
@@ -362,9 +373,9 @@ def _make_mcp_tools(config: dict[str, Any]) -> list[BaseTool]:
 
         def _make_fn(_name: str = tool_name) -> Any:
             def call_tool(**kwargs: Any) -> str:
-                tok = _get_mcp_token(server_url)  # fresh token per call
+                client = _get_mcp_client(server_url)  # fresh client per call
                 result = _run_mcp_in_thread(
-                    _mcp_call_tool, server_url, tok, _name, kwargs,
+                    _mcp_call_tool, server_url, client, _name, kwargs,
                 )
                 parts = [c.text for c in result.content if hasattr(c, "text")]
                 return "\n".join(parts) if parts else "(no output)"
