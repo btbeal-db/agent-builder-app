@@ -330,7 +330,12 @@ class AgentGraphModel(ResponsesAgent):
     def predict_stream(
         self, request: ResponsesAgentRequest
     ) -> Generator[ResponsesAgentStreamEvent, None, None]:
-        """Stream the agent graph, yielding token-level deltas from LLM nodes."""
+        """Stream the agent graph, yielding token-level deltas from LLM nodes.
+
+        Uses stream_mode=["messages", "updates"] so we get both:
+        - AIMessageChunk tokens for real-time streaming
+        - Node updates to build the final result (for non-LLM nodes)
+        """
         from langchain_core.messages import AIMessage, AIMessageChunk
 
         user_message = _extract_user_message(request)
@@ -346,35 +351,47 @@ class AgentGraphModel(ResponsesAgent):
 
         msg_id = _make_msg_id()
         streamed = False
+        final_state: dict = {}
 
-        for msg, metadata in self.compiled_graph.stream(
-            invoke_input, config=config, stream_mode="messages",
+        for chunk in self.compiled_graph.stream(
+            invoke_input, config=config,
+            stream_mode=["messages", "updates"],
         ):
-            # Only stream AI message content chunks (skip tool calls)
-            if isinstance(msg, (AIMessage, AIMessageChunk)):
-                if msg.content and not getattr(msg, "tool_calls", None):
-                    streamed = True
-                    yield ResponsesAgentStreamEvent(
-                        **create_text_delta(str(msg.content), msg_id)
-                    )
+            mode, data = chunk
 
-        # If nothing was streamed (e.g. interrupt, structured output, or
-        # non-LLM-only graphs), fall back to invoke + filter_output.
+            if mode == "messages":
+                msg, metadata = data
+                # Stream AI message content chunks (skip tool calls)
+                if isinstance(msg, (AIMessage, AIMessageChunk)):
+                    if msg.content and not getattr(msg, "tool_calls", None):
+                        streamed = True
+                        yield ResponsesAgentStreamEvent(
+                            **create_text_delta(str(msg.content), msg_id)
+                        )
+
+            elif mode == "updates":
+                # Accumulate state from node updates
+                if isinstance(data, dict):
+                    for node_output in data.values():
+                        if isinstance(node_output, dict):
+                            final_state.update(node_output)
+
+        # If nothing was streamed (non-LLM graphs, structured output,
+        # interrupts), emit the final output from accumulated state.
         if not streamed:
-            result = self.compiled_graph.invoke(invoke_input, config=config)
-            interrupts = result.get("__interrupt__")
+            interrupts = final_state.get("__interrupt__")
             if interrupts:
-                text = str(interrupts[0].value)
+                text = str(interrupts[0].value) if interrupts else ""
             else:
-                text, _ = filter_output(result, self.graph_def)
+                text, _ = filter_output(final_state, self.graph_def)
                 if not text:
-                    messages = result.get("messages", [])
+                    messages = final_state.get("messages", [])
                     for m in reversed(messages):
                         if isinstance(m, AIMessage) and m.content:
                             text = m.content
                             break
             yield ResponsesAgentStreamEvent(
-                **create_text_delta(str(text), msg_id)
+                **create_text_delta(str(text or ""), msg_id)
             )
 
 
