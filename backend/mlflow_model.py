@@ -322,127 +322,28 @@ class AgentGraphModel(ResponsesAgent):
     def predict_stream(
         self, request: ResponsesAgentRequest
     ) -> Generator[ResponsesAgentStreamEvent, None, None]:
-        """Stream the agent graph execution, yielding events as each node completes."""
-        user_message = _extract_user_message(request)
-        if not user_message:
-            yield ResponsesAgentStreamEvent(
-                type="response.output_text.delta",
-                delta="No user message provided.",
-            )
-            return
+        """Wrap predict() as a stream of ResponsesAgent events."""
+        response = self.predict(request)
+        output_item = response.output[0]
+        full_text = output_item["content"][0]["text"]
+        msg_id = output_item["id"]
 
-        thread_id = _get_thread_id(request)
-        config = _build_config(self.checkpointer, thread_id)
-        invoke_input = self._resolve_invoke_input(user_message, config)
-
-        msg_id = _make_msg_id()
-        output_index = 0
-        content_index = 0
-        full_text = ""
-
-        is_resume = isinstance(invoke_input, Command)
-
-        if is_resume:
-            # On resume, use invoke() to get the clean final result.
-            # Streaming a resume would replay messages from the interrupted
-            # node (e.g. the human_input prompt the user already saw),
-            # concatenating them with the next interrupt or final output.
-            result = self.compiled_graph.invoke(invoke_input, config=config)
-            interrupts = result.get("__interrupt__")
-            if interrupts:
-                full_text = str(interrupts[0].value)
-            else:
-                full_text, _ = filter_output(result, self.graph_def)
-                if not full_text:
-                    messages = result.get("messages", [])
-                    for msg in reversed(messages):
-                        if isinstance(msg, dict) and msg.get("role") == "assistant":
-                            full_text = msg.get("content", "")
-                            break
-                        elif hasattr(msg, "type") and msg.type == "ai":
-                            full_text = msg.content
-                            break
-            yield ResponsesAgentStreamEvent(
-                type="response.output_text.delta",
-                delta=str(full_text),
-                item_id=msg_id,
-                output_index=output_index,
-                content_index=content_index,
-            )
-        else:
-            # Fresh invocation — stream node-by-node.
-            # stream() does NOT raise GraphInterrupt — it yields a chunk
-            # with __interrupt__ key when the graph pauses for human input.
-            #
-            # If the graph ends with an interrupt, the interrupt prompt is
-            # the authoritative response (it typically embeds the node output
-            # via template variables like {draft_email}). We discard any
-            # previously streamed text to avoid duplication.
-            streamed_parts: list[str] = []
-            interrupt_text: str | None = None
-
-            for chunk in self.compiled_graph.stream(invoke_input, config=config):
-                # Check for interrupt chunk
-                interrupts = chunk.get("__interrupt__")
-                if interrupts:
-                    interrupt_text = str(interrupts[0].value)
-                    continue
-
-                # Each chunk is {node_name: state_update_dict}
-                for node_name, state_update in chunk.items():
-                    if not isinstance(state_update, dict):
-                        continue
-
-                    # Extract any assistant messages produced by this node
-                    messages = state_update.get("messages", [])
-                    for msg in messages:
-                        text = ""
-                        if isinstance(msg, dict) and msg.get("role") == "assistant":
-                            text = msg.get("content", "")
-                        elif hasattr(msg, "type") and msg.type == "ai":
-                            text = msg.content
-                        if text:
-                            streamed_parts.append(str(text))
-
-            # If the graph interrupted, return only the interrupt prompt.
-            # Otherwise return the streamed node outputs.
-            if interrupt_text is not None:
-                full_text = interrupt_text
-            else:
-                full_text = "".join(streamed_parts)
-
-            yield ResponsesAgentStreamEvent(
-                type="response.output_text.delta",
-                delta=full_text,
-                item_id=msg_id,
-                output_index=output_index,
-                content_index=content_index,
-            )
-
-        # Emit the completed output item
         yield ResponsesAgentStreamEvent(
-            type="response.output_item.done",
-            item={
-                "id": msg_id,
-                "type": "message",
-                "role": "assistant",
-                "content": [{"type": "output_text", "text": full_text}],
-            },
+            type="response.output_text.delta",
+            delta=full_text,
+            item_id=msg_id,
+            output_index=0,
+            content_index=0,
         )
 
-        # Emit the final response.completed event
+        yield ResponsesAgentStreamEvent(
+            type="response.output_item.done",
+            item=output_item,
+        )
+
         yield ResponsesAgentStreamEvent(
             type="response.completed",
-            response=ResponsesAgentResponse(
-                output=[
-                    {
-                        "id": msg_id,
-                        "type": "message",
-                        "role": "assistant",
-                        "content": [{"type": "output_text", "text": full_text}],
-                    }
-                ],
-            ).model_dump(),
+            response=response.model_dump(),
         )
 
 

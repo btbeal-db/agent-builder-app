@@ -13,7 +13,7 @@ import logging
 from typing import Any
 from urllib.parse import urlparse
 
-from databricks.sdk.service.dashboards import MessageStatus
+from databricks.sdk.service.dashboards import MessageStatus, TextAttachmentPurpose
 from databricks.sdk.service.vectorsearch import RerankerConfig, RerankerConfigRerankerParameters
 from databricks_langchain import UCFunctionToolkit
 from databricks_langchain.uc_ai import DatabricksFunctionClient
@@ -128,6 +128,9 @@ def _make_genie_tool(config: dict[str, Any]) -> BaseTool:
         parts: list[str] = []
         for attachment in message.attachments or []:
             if attachment.text and attachment.text.content:
+                # Skip follow-up question suggestions from Genie
+                if getattr(attachment.text, "purpose", None) == TextAttachmentPurpose.FOLLOW_UP_QUESTION:
+                    continue
                 parts.append(attachment.text.content)
 
             if attachment.query and attachment.attachment_id:
