@@ -219,7 +219,11 @@ class LLMNode(BaseNode):
 
         # LLM calls use the SP credentials (default env vars). FMAPI's data-plane
         # does not accept OBO tokens. Data-access nodes (VS, Genie, UC) use OBO.
-        llm = ChatDatabricks(endpoint=endpoint, temperature=temperature)
+        llm = ChatDatabricks(
+            endpoint=endpoint,
+            temperature=temperature,
+            stop=["\nUser:", "\n\nUser:"],
+        )
 
         # Bind tools if configured
         tools_json_raw = config.get("tools_json", "")
