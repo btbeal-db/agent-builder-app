@@ -2,7 +2,7 @@
 
 Visual drag-and-drop [LangGraph](https://langchain-ai.github.io/langgraph/) agent builder for Databricks. Build, preview, and deploy AI agents — no code required.
 
-**Built-in node types:** LLM, Router, Vector Search, Genie, UC Function, Human Input
+**Built-in node types:** LLM, Router, Vector Search, Genie, UC Function, MCP Server, Human Input
 
 ## Deploy
 
@@ -75,6 +75,37 @@ Databricks Apps support on-behalf-of (OBO) tokens for some APIs, but several cri
 When you deploy an agent, the app declares every external resource your graph references (serving endpoints, Vector Search indexes, Genie rooms, UC functions, and tables) as [MLflow model resources](https://docs.databricks.com/en/machine-learning/manage-model-lifecycle/index.html). At serving time, Model Serving uses **on-behalf-of (OBO) credentials** — each caller's request runs with their own identity and permissions. Your agent doesn't get blanket access to data; each caller only reaches what they're already allowed to see.
 
 The app never creates shadow admin roles, never bypasses UC permissions, and never stores or logs your PAT.
+
+## MCP Server Tools
+
+The **MCP Server** node connects your agent to any [Model Context Protocol](https://modelcontextprotocol.io/) server and exposes its tools to LLM nodes. Drop an MCP Server onto an LLM node to give the LLM access to all of the server's tools — one URL is all you need.
+
+### Supported server types
+
+| Type | URL pattern | Example |
+|---|---|---|
+| **Managed MCP** | `<host>/api/2.0/mcp/functions/<catalog>/<schema>` | UC functions, Vector Search indexes, Genie rooms hosted by Databricks |
+| **External MCP** | `<host>/api/2.0/mcp/external/<connection>` | Third-party servers (GitHub, Slack, etc.) proxied through a [Unity Catalog connection](https://docs.databricks.com/aws/en/generative-ai/mcp/external-mcp) |
+| **Custom MCP** | Any Streamable HTTP URL | Your own MCP servers, including [FastMCP](https://gofastmcp.com/) apps deployed on Databricks Apps |
+
+All three types work for both preview and deploy. Auth is handled automatically using `DatabricksOAuthClientProvider`.
+
+### How it works
+
+1. **Drag** an MCP Server node onto an LLM node (or add it as a standalone graph node)
+2. **Paste** the server URL and optionally filter which tools to expose
+3. **Preview** — the app discovers available tools from the server and binds them to the LLM
+4. **Deploy** — tool metadata (names, descriptions, schemas) is persisted in the model artifact so the served endpoint never needs to re-contact the server for tool discovery
+
+### Configuration
+
+| Field | Required | Description |
+|---|---|---|
+| **Server URL** | Yes | The MCP server endpoint URL |
+| **Tool Filter** | No | Comma-separated list of tool names to expose (empty = all) |
+| **Tool Description** | No | Custom description telling the LLM when to use this tool |
+
+When used as a standalone node (not attached to an LLM), you also specify a **Tool Name** to call directly and an **Input from** state variable.
 
 ## Conversational Agents and Lakebase
 

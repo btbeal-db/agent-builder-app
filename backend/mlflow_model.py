@@ -360,8 +360,13 @@ class AgentGraphModel(ResponsesAgent):
 
             if mode == "messages":
                 msg, metadata = data
-                # Stream AI message content chunks (skip tool calls)
-                if isinstance(msg, (AIMessage, AIMessageChunk)):
+                # Only stream AIMessageChunk (incremental tokens).
+                # AIMessageChunk is a subclass of AIMessage, so
+                # isinstance(chunk, AIMessage) is True — but we must
+                # skip plain AIMessage instances because LangGraph
+                # yields the full completed message at the end of each
+                # node, which would duplicate the already-streamed text.
+                if type(msg) is AIMessageChunk:
                     if msg.content and not getattr(msg, "tool_calls", None):
                         streamed_parts.append(str(msg.content))
                         yield ResponsesAgentStreamEvent(
@@ -396,24 +401,14 @@ class AgentGraphModel(ResponsesAgent):
         else:
             full_text = "".join(streamed_parts)
 
-        # Final output item (same item_id as the deltas)
+        # Final output item (same item_id as the deltas).
+        # Do NOT emit response.completed — the Playground renders its
+        # output array as additional text, duplicating everything that
+        # was already streamed via deltas.  The serving layer's [DONE]
+        # signal is sufficient to end the stream.
         yield ResponsesAgentStreamEvent(
             type="response.output_item.done",
             item=create_text_output_item(full_text, msg_id),
-        )
-
-        # Final completion event with the full response object
-        yield ResponsesAgentStreamEvent(
-            type="response.completed",
-            response=ResponsesAgentResponse(
-                id=_make_resp_id(),
-                output=[{
-                    "id": msg_id,
-                    "type": "message",
-                    "role": "assistant",
-                    "content": [{"type": "output_text", "text": full_text}],
-                }],
-            ).model_dump(),
         )
 
 
