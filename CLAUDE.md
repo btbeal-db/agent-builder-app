@@ -94,8 +94,7 @@ Users link the GitHub repo to a Databricks App and deploy. No custom scopes, no 
 | Operation | Credential | Why |
 |---|---|---|
 | Preview -- VS, Genie, UC Functions | PAT > OBO | PAT preferred; OBO lacks `vector-search` scope |
-| Preview -- MCP (managed URLs) | PAT > OBO | Same as VS/Genie; managed MCP is a workspace API |
-| Preview -- MCP (Databricks Apps) | OBO > PAT | Apps URLs prefer OBO (OAuth); PAT is fallback |
+| Preview -- MCP (all URL types) | PAT > OBO (Apps: OBO > PAT) | Uses `DatabricksOAuthClientProvider`; Apps URLs prefer OBO |
 | Preview -- LLM inference | SP | FMAPI rejects OBO and PAT |
 | User identity | OBO | Default `iam.current-user:read` scope works |
 | MLflow experiment logging | SP | No OBO scope for MLflow |
@@ -109,15 +108,35 @@ Connects to MCP servers and exposes their tools to LLM nodes. One URL auto-disco
 
 ### Supported MCP URL types
 
-- **Managed MCP** (`<host>/api/2.0/mcp/functions/<catalog>/<schema>`, `.../vector-search/...`, `.../genie/...`) -- Databricks-hosted, PAT works directly.
-- **Custom MCP on Databricks Apps** (`*.databricksapps.com/mcp`) -- user-deployed FastMCP servers. On the deployed app, auth flows through automatically via the OBO token.
-- **External MCP** (`<host>/api/2.0/mcp/external/<connection>`) -- UC connection proxy to external servers. Requires connection setup in Unity Catalog (not yet wired into the node config).
+- **Managed MCP** (`<host>/api/2.0/mcp/functions/<catalog>/<schema>`, `.../vector-search/...`, `.../genie/...`) -- Databricks-hosted managed MCP servers for UC functions, Vector Search, and Genie.
+- **External MCP** (`<host>/api/2.0/mcp/external/<connection>`) -- UC connection proxy to external servers (e.g. GitHub, Slack). Requires a Unity Catalog connection to be configured in the workspace.
+- **Custom MCP on Databricks Apps** (`*.databricksapps.com/mcp`) -- user-deployed FastMCP servers on Databricks Apps.
+
+All three URL types are fully supported for both preview and deploy.
+
+### Authentication
+
+All MCP communication uses `DatabricksOAuthClientProvider` from `databricks_mcp` for proper OAuth auth. This is required by the Databricks MCP proxy — raw Bearer token headers do not work for external MCP connections.
+
+- `_get_mcp_client(server_url)` in `tools.py` returns a `WorkspaceClient` with the right credentials: OBO first for Databricks Apps URLs, then the standard PAT > OBO > SP chain via `get_data_client()`.
+- `_mcp_session(server_url, client)` wraps the MCP SDK's `streamablehttp_client` with `auth=DatabricksOAuthClientProvider(client)`.
+- Each tool **call** gets a fresh `WorkspaceClient` via `_get_mcp_client()` so tokens are never stale.
+
+### Tool discovery and persistence
+
+MCP tool metadata (names, descriptions, input schemas) can be resolved two ways:
+
+- **Live discovery** (preview): connects to the MCP server at execution time via `_mcp_list_tools()`. Retries once for cold-start on Databricks Apps.
+- **Persisted metadata** (deployed models): at deploy time, `_persist_mcp_tool_metadata()` in `main.py` discovers all MCP tools and injects `discovered_tools` into the graph_def artifact. The served model builds LangChain tools from this metadata without ever contacting the MCP server for discovery. Only actual tool **calls** hit the server at inference time.
+
+This split exists because serving endpoints may not be able to reach MCP servers for discovery (network/auth differences), but they can reach them for individual tool calls with proper resource declarations.
+
+If `discovered_tools` is present in the config, `_make_mcp_tools()` uses it. Otherwise it falls back to live discovery. The `discover_mcp_tool_metadata()` helper returns serializable dicts suitable for JSON persistence.
 
 ### Implementation notes
 
-- Bypasses `DatabricksMCPClient` from `databricks_mcp` for the data path. That SDK rejects PAT auth for Apps URLs (client-side validation), but PAT/OBO tokens work fine at the HTTP level. We use the raw MCP SDK (`streamablehttp_client` + `ClientSession`) directly.
 - All MCP calls run in `_run_mcp_in_thread()` because the MCP SDK uses `asyncio.run()` internally, which crashes inside FastAPI's event loop.
-- `_get_mcp_token(server_url)` selects the right credential: OBO first for Apps URLs, then the standard PAT > OBO > SP chain via `get_data_client()`.
+- Tool creation uses `StructuredTool` with the MCP tool's `inputSchema` dict as `args_schema`. LangChain 1.2+ accepts raw JSON Schema dicts here.
 - Deploy-time resource extraction (`_extract_resources` in `main.py`) still uses `DatabricksMCPClient.get_databricks_resources()` with SP credentials, since that runs in a thread pool and needs programmatic resource resolution.
 
 ## Known Gotchas
@@ -126,6 +145,7 @@ Connects to MCP servers and exposes their tools to LLM nodes. One URL auto-disco
 - **Lakebase OAuth token expiry**: Autoscaling projects use tokens that expire after 1 hour. Serving endpoints use a `ConnectionPool` with a custom `Connection` subclass that calls `generate_database_credential()` for fresh tokens on each new connection.
 - **CPU serving tracing**: Endpoints need `ENABLE_MLFLOW_TRACING=true` and `MLFLOW_EXPERIMENT_ID` env vars explicitly. `autolog()` alone is insufficient.
 - **OBO + SP env var conflict**: The SDK loads `client_id`/`client_secret` from env into its Config even with `auth_type="pat"`. If both are present, the server treats it as an SP OAuth call (wrong scopes). `get_workspace_client()` masks SP env vars before creating an OBO client AND passes `auth_type="pat"`. Both are required. Always restore via `finally`.
+- **Streaming duplication in predict_stream**: LangGraph's `stream_mode="messages"` yields both `AIMessageChunk` (incremental tokens) and `AIMessage` (the final complete message). Since `AIMessageChunk` is a subclass of `AIMessage`, `isinstance(msg, AIMessage)` matches both — causing the full text to be emitted twice. Use `type(msg) is AIMessageChunk` to filter only incremental chunks. The `response.completed` SSE event must also be omitted because the Databricks AI Playground renders its output array as additional text.
 
 ## Dev Preferences
 

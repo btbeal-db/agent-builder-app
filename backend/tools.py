@@ -10,19 +10,19 @@ import asyncio
 import concurrent.futures
 import json
 import logging
+import os
 from typing import Any
 from urllib.parse import urlparse
 
+from databricks.sdk import WorkspaceClient
 from databricks.sdk.service.dashboards import MessageStatus
 from databricks.sdk.service.vectorsearch import RerankerConfig, RerankerConfigRerankerParameters
 from databricks_langchain import UCFunctionToolkit
 from databricks_langchain.uc_ai import DatabricksFunctionClient
+from databricks_mcp import DatabricksOAuthClientProvider
 from langchain_core.tools import BaseTool, StructuredTool, tool
 from mcp.client.session import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
-
-from databricks.sdk import WorkspaceClient
-from databricks_mcp import DatabricksOAuthClientProvider
 
 from .auth import get_data_client, get_user_token
 
@@ -203,9 +203,6 @@ def _get_mcp_client(server_url: str) -> WorkspaceClient:
     For Databricks Apps URLs the OBO token from the Apps proxy is
     preferred because it is an OAuth token that Apps accept reliably.
     """
-    import os
-    from .auth import create_pat_client
-
     if urlparse(server_url).netloc.endswith(".databricksapps.com"):
         obo = get_user_token()
         if obo:
@@ -213,13 +210,6 @@ def _get_mcp_client(server_url: str) -> WorkspaceClient:
             return WorkspaceClient(host=host, token=obo, auth_type="pat")
 
     return get_data_client()
-
-
-def _get_mcp_token(server_url: str) -> str:
-    """Get a Bearer token for MCP calls (used by deploy-time discovery)."""
-    w = _get_mcp_client(server_url)
-    headers = w.config.authenticate()
-    return headers["Authorization"].split("Bearer ", 1)[1]
 
 
 def _run_mcp_in_thread(fn, *args, **kwargs):

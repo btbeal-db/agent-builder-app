@@ -48,6 +48,7 @@ from .auth import (
 )
 from .ai_chat import AIChatRequest, AIChatResponse, handle_ai_chat
 from .graph_builder import build_graph, filter_output, run_graph
+from .tools import discover_mcp_tool_metadata
 from .nodes import get_all_metadata
 from .lakebase import LakebaseConfig, provision_lakebase, resolve_lakebase
 from .setup import router as setup_router
@@ -273,8 +274,6 @@ def _persist_mcp_tool_metadata(graph: GraphDef, pat: str = "") -> None:
     Uses a PAT-authenticated WorkspaceClient for discovery (same credential
     that works during preview).  Falls back to SP if no PAT is provided.
     """
-    from .tools import discover_mcp_tool_metadata
-
     # Build a WorkspaceClient for MCP discovery
     pat_client = create_pat_client(pat) if pat else None
 
@@ -284,8 +283,8 @@ def _persist_mcp_tool_metadata(graph: GraphDef, pat: str = "") -> None:
             try:
                 client = get_sp_workspace_client()
             except RuntimeError:
-                from databricks.sdk import WorkspaceClient as WC
-                client = WC()
+                from databricks.sdk import WorkspaceClient
+                client = WorkspaceClient()
         return discover_mcp_tool_metadata(url, client)
 
     for node in graph.nodes:
