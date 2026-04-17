@@ -57,6 +57,7 @@ backend/
   notebook_gen.py      Generates deployment notebooks
   tools.py             LangChain tool factory (VS, Genie, UC Function)
   ai_chat.py           AI chat assistant for graph building
+  lakebase.py          Lakebase provisioning + Postgres connection pool
   nodes/               Pluggable node types (auto-discovered)
     base.py            BaseNode ABC + config field types
     llm_node.py        LLM node (ChatDatabricks)
@@ -64,6 +65,7 @@ backend/
     vector_search_node.py
     genie_node.py
     uc_function_node.py
+    mcp_node.py        MCP server integration
     human_input_node.py
 
 frontend/
@@ -182,6 +184,39 @@ A `LAKEBASE_CONN_STRING` fallback exists for non-Lakebase Postgres instances but
 | Token generation (serving time) | Service Principal | SP credentials auto-detected by `WorkspaceClient()` |
 | Postgres connection (serving time) | SP identity | OAuth token as password, SP email as username |
 
+## Branching Model
+
+| Branch | Purpose | Merges from | Protected |
+|---|---|---|---|
+| `main` | Production — deployed to the Databricks App | `dev` | Yes |
+| `dev` | Integration — all feature work lands here first | feature branches | Yes |
+| `your-name/description` | Feature branches | — | No |
+
+**Workflow:** Create a feature branch from `dev`, open a PR back to `dev`. After testing on `dev`, promote to `main` via a separate PR.
+
+### Branch protections
+
+Both `dev` and `main` require:
+
+- A pull request (no direct push)
+- CI checks passing (`Frontend Build` + `Backend Tests`)
+- 1 approval from a reviewer (repo admins can bypass)
+
+## CI Pipeline
+
+CI runs on every push and PR to `dev` and `main` (`.github/workflows/ci.yml`).
+
+| Job | What it does |
+|---|---|
+| **Frontend Build** | `npm ci` + `npm run build` (includes TypeScript type checking) |
+| **Backend Tests** | `uv sync --dev` + `pytest -m "not integration"` |
+
+Tests marked `@pytest.mark.integration` (e.g., those requiring live Databricks credentials) are skipped in CI. Run them locally:
+
+```bash
+uv run pytest  # runs all tests including integration
+```
+
 ## Pull Requests
 
 ### Guidelines
@@ -190,6 +225,7 @@ A `LAKEBASE_CONN_STRING` fallback exists for non-Lakebase Postgres instances but
 - **Keep diffs small.** If a feature touches many files, consider breaking it into stacked PRs (e.g., backend first, then frontend).
 - **Don't refactor while fixing.** If you notice nearby code that could be improved, open a separate PR for it.
 - **Test before opening.** Run the app locally and verify your change works in the preview canvas. If you're adding a node, test it with at least one graph that exercises it.
+- **Run tests locally.** `uv run pytest -m "not integration" -q` should pass before you open a PR.
 - **Update CONTRIB.md** if your change adds new patterns, config field types, or resource declarations that other contributors need to know about.
 
 ### Branch naming

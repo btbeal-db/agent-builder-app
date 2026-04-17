@@ -3,11 +3,9 @@
 from backend.nodes.llm_node import (
     _resolve_templates,
     _build_state_context,
-    _format_conversation_history,
     _build_schema_instruction,
     build_pydantic_model,
 )
-from langchain_core.messages import HumanMessage, AIMessage
 
 
 class TestResolveTemplates:
@@ -47,53 +45,6 @@ class TestBuildStateContext:
 
     def test_empty_state(self):
         result = _build_state_context({})
-        assert result == ""
-
-
-class TestFormatConversationHistory:
-    def test_dict_messages(self):
-        state = {
-            "messages": [
-                {"role": "user", "content": "hi"},
-                {"role": "assistant", "content": "hello"},
-            ]
-        }
-        result = _format_conversation_history(state)
-        assert "User: hi" in result
-        assert "Assistant: hello" in result
-
-    def test_base_message_objects(self):
-        state = {
-            "messages": [
-                HumanMessage(content="hi"),
-                AIMessage(content="hello"),
-            ]
-        }
-        result = _format_conversation_history(state)
-        assert "User: hi" in result
-        assert "Assistant: hello" in result
-
-    def test_last_n(self):
-        state = {
-            "messages": [
-                {"role": "user", "content": "msg1"},
-                {"role": "assistant", "content": "msg2"},
-                {"role": "user", "content": "msg3"},
-                {"role": "assistant", "content": "msg4"},
-            ]
-        }
-        result = _format_conversation_history(state, last_n=2)
-        assert "msg1" not in result
-        assert "msg2" not in result
-        assert "msg3" in result
-        assert "msg4" in result
-
-    def test_empty_messages(self):
-        result = _format_conversation_history({"messages": []})
-        assert result == ""
-
-    def test_no_messages_key(self):
-        result = _format_conversation_history({})
         assert result == ""
 
 

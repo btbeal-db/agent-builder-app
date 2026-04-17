@@ -118,9 +118,12 @@ uv run uvicorn backend.main:app --reload --port 8000
 
 # Frontend (proxies /api to :8000)
 cd frontend && npm run dev
+
+# Run tests
+uv run pytest -m "not integration" -q
 ```
 
-See [CONTRIB.md](CONTRIB.md) for the full developer guide.
+CI runs `Frontend Build` and `Backend Tests` on every PR to `dev` and `main`. See [CONTRIB.md](CONTRIB.md) for the full developer guide.
 
 ## Troubleshooting
 
