@@ -126,13 +126,12 @@ class TestRouterNodeExecute:
         result = self.node.execute(state, config)
         assert result["_route"] == "true"
 
-    def test_messages_included(self):
+    def test_route_value_returned(self):
         state = {"x": "yes"}
         config = {
             "evaluates": "x",
             "routes_json": [{"label": "Y", "match_value": "yes"}],
         }
         result = self.node.execute(state, config)
-        assert "messages" in result
-        assert len(result["messages"]) == 1
-        assert result["messages"][0]["node"] == "router"
+        assert "_route" in result
+        assert result["_route"] == "yes"

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import os
 
+import pytest
+
 from backend.auth import set_user_token, get_user_token, get_workspace_client
 
 
@@ -20,6 +22,7 @@ class TestTokenContextVar:
 
 
 class TestGetWorkspaceClient:
+    @pytest.mark.integration
     def test_no_token_returns_default_client(self):
         set_user_token(None)
         w = get_workspace_client()
