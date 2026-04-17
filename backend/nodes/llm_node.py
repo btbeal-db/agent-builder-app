@@ -215,11 +215,14 @@ class LLMNode(BaseNode):
                 from ..tools import make_tools_from_json
                 tools = make_tools_from_json(str(tools_json_raw))
                 if not tools:
-                    logger.warning("tools_json was configured but no tools were created. "
-                                   "tools_json=%s", str(tools_json_raw)[:200])
+                    logger.error(
+                        "tools_json was configured but no tools were created — "
+                        "the LLM will proceed without tools. tools_json=%s",
+                        str(tools_json_raw)[:200],
+                    )
                 else:
                     logger.info("Bound %d tools: %s", len(tools), [t.name for t in tools])
-                llm = llm.bind_tools(tools)
+                    llm = llm.bind_tools(tools)
             except Exception as exc:
                 return {writes_to: f"Error binding tools: {exc}"}
 

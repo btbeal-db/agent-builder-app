@@ -263,6 +263,67 @@ def _collect_mcp_urls(graph: GraphDef) -> list[str]:
     return urls
 
 
+def _persist_mcp_tool_metadata(graph: GraphDef, pat: str = "") -> None:
+    """Discover MCP tools and inject ``discovered_tools`` into the graph config.
+
+    Called at deploy time so the served model has tool metadata baked in
+    and never needs to re-contact the MCP server for discovery.  Mutates
+    the graph in place (caller should pass a deep copy).
+
+    Uses the user's PAT for discovery (same credential that works during
+    preview).  Falls back to SP if no PAT is provided.
+    """
+    from .tools import discover_mcp_tool_metadata, _get_mcp_token
+
+    for node in graph.nodes:
+        # Standalone MCP nodes (not attached as tools)
+        if node.type == "mcp_server" and node.config.get("server_url"):
+            url = node.config["server_url"]
+            try:
+                token = pat or _get_mcp_token(url)
+                metadata = discover_mcp_tool_metadata(url, token)
+                node.config["discovered_tools"] = metadata
+                logger.info("Persisted %d MCP tools for standalone node %s (%s)",
+                            len(metadata), node.id, url)
+            except Exception as exc:
+                logger.warning("Failed to pre-discover MCP tools for node %s (%s): %s",
+                               node.id, url, exc)
+
+        # MCP tools attached to LLM nodes via tools_json
+        tools_json_raw = node.config.get("tools_json", "")
+        if not (tools_json_raw and str(tools_json_raw).strip()):
+            continue
+
+        try:
+            tool_configs = json.loads(str(tools_json_raw))
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if not isinstance(tool_configs, list):
+            continue
+
+        modified = False
+        for tc in tool_configs:
+            if tc.get("type") != "mcp_server":
+                continue
+            tc_config = tc.get("config", {})
+            url = tc_config.get("server_url", "")
+            if not url:
+                continue
+            try:
+                token = pat or _get_mcp_token(url)
+                metadata = discover_mcp_tool_metadata(url, token)
+                tc_config["discovered_tools"] = metadata
+                modified = True
+                logger.info("Persisted %d MCP tools for LLM-attached tool on node %s (%s)",
+                            len(metadata), node.id, url)
+            except Exception as exc:
+                logger.warning("Failed to pre-discover MCP tools for LLM-attached tool "
+                               "on node %s (%s): %s", node.id, url, exc)
+
+        if modified:
+            node.config["tools_json"] = json.dumps(tool_configs)
+
+
 def _build_auth_policy(
     graph: GraphDef,
     client: "WorkspaceClient | None" = None,
@@ -838,8 +899,13 @@ def deploy_graph(req: DeployRequest):
 
             # Persist auth_mode into the graph_def artifact so the served
             # model knows which credential strategy to use at runtime.
-            graph_for_artifact = req.graph.model_copy()
+            graph_for_artifact = req.graph.model_copy(deep=True)
             graph_for_artifact.auth_mode = req.auth_mode.value
+
+            # Pre-discover MCP tools and persist their metadata so the
+            # served model never needs to contact the MCP server for
+            # tool discovery (only for actual tool calls).
+            _persist_mcp_tool_metadata(graph_for_artifact, pat=req.pat)
 
             with tempfile.NamedTemporaryFile(
                 mode="w", suffix=".json", delete=False
