@@ -17,15 +17,14 @@ The app is live. See [Databricks Apps docs](https://docs.databricks.com/aws/en/d
 
 ## First-Time Setup
 
-Each user completes two steps before building agents:
+### 1. MLflow experiment folder (one-time)
 
-### 1. MLflow experiment folder (one-time, on the Setup page)
+The app needs a folder in your workspace to log MLflow models and traces, and the app's service principal needs `Can Manage` on it. Both are handled automatically on first sign-in:
 
-This lets the app log MLflow models on your behalf when you deploy.
+1. Sign in to the app. A modal pops up titled **Set up your experiments folder** with the path pre-filled (`/Users/you@company.com/agent-sweet`). Edit the path if you want a different location.
+2. Click **Create**. The app uses your on-behalf-of token to create the folder and grant its service principal `Can Manage`, then validates by writing a probe MLflow experiment. No admin help needed, no leaving the app.
 
-1. Create a folder under your user directory (e.g. `/Users/you@company.com/agent-sweet`)
-2. The Setup page shows the app's service principal name — grant it **Can Manage** on your folder
-3. Click **Validate** to confirm
+If the modal is dismissed (Skip for now / click outside), the **Setup** tab in the nav rail has the same auto-setup card, plus a "Set up manually instead" link that walks you through the steps in the Databricks UI as a fallback (useful if a workspace policy blocks `permissions.update` via OBO).
 
 ### 2. Confirm the app's OBO scopes
 
@@ -183,7 +182,8 @@ CI runs `Frontend Build` and `Backend Tests` on every PR to `dev` and `main`. Se
 
 | Issue | Fix |
 |---|---|
-| Setup validation fails | Make sure you created a **folder** (not an MLflow experiment) and granted the SP "Can Manage" |
+| Setup auto-create fails with a permissions error | Your workspace policy may block `permissions.update` via OBO. Use the manual flow on the Setup tab. |
+| Setup validation fails (manual flow) | Make sure you created a **folder** (not an MLflow experiment) and granted the SP "Can Manage" |
 | Preview fails with an OBO/auth error after you added scopes | Your browser is still using the OAuth session from before the scopes existed — newly-added scopes are **not** re-requested for an existing session. Clear cookies for the app's hostname (or open it in a private window) and log in again to get a fresh token with the updated scopes. |
 | Registration fails with auth error | Check that your PAT is valid and you have `CREATE MODEL` on the target catalog/schema |
 | Endpoint creation fails | Verify your PAT has `CREATE SERVING ENDPOINT` permissions |

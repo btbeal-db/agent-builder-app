@@ -7,7 +7,6 @@
       "writes_to": "agent_output",
       "config": {
         "system_prompt": "You are a helpful medical office assistant that attempts to answer questions asked of you about patients. ",
-        "temperature": 0.7,
         "last_n_messages": 0,
         "endpoint": "databricks-claude-sonnet-4-6",
         "tools_json": "[{\"type\":\"vector_search\",\"config\":{\"tool_description\":\"A vector search index full of patient notes, which returns patient ids, note ids, and the patient note\",\"index_name\":\"agentbuilder_serverless_stable_catalog.agent_builder.patient_notes_index\",\"endpoint_name\":\"agent-builder-vs\",\"columns\":\"patient_id, note_id, text\"}},{\"type\":\"genie\",\"config\":{\"room_id\":\"01f127940d8719c3a222314e628d71a7\",\"tool_description\":\"A text2sql agent that queries a sql warehouse of patient demographics and notes with a plain text user query.\"}}]",

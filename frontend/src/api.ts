@@ -37,6 +37,7 @@ export async function streamPreview(
   resumeValue: string | null | undefined,
   pat: string | null | undefined,
   onEvent: (event: PreviewEvent) => void,
+  signal?: AbortSignal,
 ): Promise<void> {
   const body: Record<string, unknown> = {
     graph,
@@ -50,6 +51,7 @@ export async function streamPreview(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
+    signal,
   });
   if (!res.ok) throw new Error(`Preview failed: ${res.status} ${res.statusText}`);
 
@@ -168,12 +170,14 @@ export async function getSetupInfo(): Promise<SetupInfoResponse> {
   return res.json();
 }
 
-export async function validateSetup(experimentPath: string): Promise<SetupValidateResponse> {
-  const res = await fetch(`${BASE}/setup/validate`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ experiment_path: experimentPath }),
-  });
+export async function validateSetup(): Promise<SetupValidateResponse> {
+  const res = await fetch(`${BASE}/setup/validate`, { method: "POST" });
   if (!res.ok) throw new Error("Failed to validate setup");
+  return res.json();
+}
+
+export async function autoSetup(): Promise<SetupValidateResponse> {
+  const res = await fetch(`${BASE}/setup/auto-setup`, { method: "POST" });
+  if (!res.ok) throw new Error("Failed to auto-setup");
   return res.json();
 }

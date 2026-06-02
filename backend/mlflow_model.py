@@ -40,6 +40,7 @@ if _parent_dir not in sys.path:
 
 from backend.auth import set_auth_mode, set_serving
 from backend.graph_builder import build_graph, filter_output, interrupt_value, pending_interrupts
+from backend.nodes.llm_node import extract_visible_text
 from backend.schema import GraphDef
 
 logger = logging.getLogger(__name__)
@@ -360,7 +361,10 @@ class AgentGraphModel(ResponsesAgent):
                 # yields the full completed message at the end of each
                 # node, which would duplicate the already-streamed text.
                 if type(msg) is AIMessageChunk and msg.content and not getattr(msg, "tool_calls", None):
-                    text = str(msg.content)
+                    text = extract_visible_text(msg.content)
+                    if not text:
+                        # All-reasoning chunk (gpt-oss harmony) — skip.
+                        continue
                     if boundary_pending:
                         text = "\n\n" + text
                         boundary_pending = False

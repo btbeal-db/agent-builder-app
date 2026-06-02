@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 
+from databricks.sdk.service.serving import EndpointStateReady
 from fastapi import APIRouter
 from pydantic import BaseModel
 
@@ -66,7 +67,7 @@ def list_serving_endpoints() -> DiscoveryResponse:
         w = get_workspace_client()
         options: list[DiscoveryOption] = []
         for ep in w.serving_endpoints.list():
-            state = "Ready" if ep.state and ep.state.ready == "READY" else "Not ready"
+            state = "Ready" if ep.state and ep.state.ready == EndpointStateReady.READY else "Not ready"
             creator = ep.creator or ""
             desc_parts = [state]
             if creator:

@@ -1,7 +1,7 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { memo, useState, useRef, useEffect, useCallback } from "react";
 import { ArrowUp, X, Trash2 } from "lucide-react";
 import { streamPreview, validateGraph } from "../api";
-import type { ChatMessage, GraphDef } from "../types";
+import type { ChatMessage, GraphDef, TraceSpan } from "../types";
 import SimpleMarkdown from "./SimpleMarkdown";
 
 interface Props {
@@ -90,10 +90,19 @@ export default function ChatPlayground({ graphGetter, onClose }: Props) {
   const [threadId, setThreadId] = useState<string | null>(null);
   const [pendingInterrupt, setPendingInterrupt] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  // Tracks the in-flight preview stream so we can abort it on unmount or
+  // when the user fires off a new send before the previous one finishes.
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+    };
+  }, []);
 
   const scrollOnToggle = useCallback((e: React.SyntheticEvent<HTMLDetailsElement>) => {
     const details = e.currentTarget;
@@ -147,7 +156,17 @@ export default function ChatPlayground({ graphGetter, onClose }: Props) {
       thinking: pickVerb(),
     };
 
-    setMessages((prev) => [...prev, userMsg, placeholder]);
+    // Drop trace blobs from prior turns. Each mlflow_trace/execution_trace can
+    // be hundreds of KB (full LLM IO + span tree); without this, long sessions
+    // grow the heap unboundedly and Chrome eventually OOM-kills the renderer.
+    setMessages((prev) => {
+      const trimmed = prev.map((m) =>
+        m.execution_trace || m.mlflow_trace
+          ? { ...m, execution_trace: undefined, mlflow_trace: undefined }
+          : m
+      );
+      return [...trimmed, userMsg, placeholder];
+    });
     const userInput = input.trim();
     setInput("");
     setIsLoading(true);
@@ -175,6 +194,10 @@ export default function ChatPlayground({ graphGetter, onClose }: Props) {
         }, VERB_ROTATE_MS);
       }, delay);
     };
+
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
 
     try {
       const graph = graphGetter!();
@@ -234,9 +257,14 @@ export default function ChatPlayground({ graphGetter, onClose }: Props) {
           setPendingInterrupt(false);
           updatePlaceholder({ content: "", thinking: null, error: event.message });
         }
-      });
+      }, controller.signal);
     } catch (err) {
       stopThinking();
+      // Aborts (unmount or new send superseded this one) are intentional —
+      // don't render them as errors.
+      if (err instanceof DOMException && err.name === "AbortError") {
+        return;
+      }
       const message =
         err instanceof Error ? err.message : String(err);
       updatePlaceholder({
@@ -247,6 +275,9 @@ export default function ChatPlayground({ graphGetter, onClose }: Props) {
       setPendingInterrupt(false);
     } finally {
       stopThinking();
+      if (abortRef.current === controller) {
+        abortRef.current = null;
+      }
       setIsLoading(false);
     }
   }, [input, graphGetter, isLoading, addErrorMessage, threadId, pendingInterrupt]);
@@ -274,89 +305,7 @@ export default function ChatPlayground({ graphGetter, onClose }: Props) {
           )}
 
           {messages.map((msg) => (
-            <div key={msg.id} className={`chat-msg chat-msg-${msg.role}`}>
-              {msg.content && (
-                <div className="chat-msg-content">
-                  {(() => {
-                    try {
-                      const parsed = JSON.parse(msg.content);
-                      if (typeof parsed === "object" && parsed !== null) {
-                        return <pre className="chat-json-output">{JSON.stringify(parsed, null, 2)}</pre>;
-                      }
-                    } catch { /* not JSON, render as markdown */ }
-                    return <SimpleMarkdown content={msg.content} />;
-                  })()}
-                </div>
-              )}
-
-              {msg.thinking && (
-                <div className="chat-msg-thinking">
-                  <span className="chat-msg-thinking-dot" />
-                  {msg.thinking}…
-                </div>
-              )}
-
-              {msg.error && (
-                <pre className="result-error">{msg.error}</pre>
-              )}
-
-              {msg.execution_trace && msg.execution_trace.length > 0 && (
-                <details className="result-details" onToggle={scrollOnToggle}>
-                  <summary>Trace ({msg.execution_trace.length} steps)</summary>
-                  <div className="trace">
-                    {msg.execution_trace.map((step, i) => (
-                      <div key={i} className="trace-step">
-                        <span className="trace-badge">{step.node ?? step.role}</span>
-                        <span className="trace-content">{step.content}</span>
-                      </div>
-                    ))}
-                  </div>
-                </details>
-              )}
-
-              {msg.mlflow_trace && msg.mlflow_trace.length > 0 && (
-                <details className="result-details" onToggle={scrollOnToggle}>
-                  <summary>MLflow Trace ({msg.mlflow_trace.length} spans)</summary>
-                  <div className="mlflow-trace">
-                    {msg.mlflow_trace.map((span, i) => (
-                      <details key={i} className="mlflow-span" onToggle={scrollOnToggle}>
-                        <summary className="mlflow-span-header">
-                          <span className={`mlflow-span-status mlflow-span-status-${span.status?.toLowerCase().replace(/[^a-z]/g, "")}`} />
-                          <span className="mlflow-span-name">{span.name}</span>
-                          {span.end_time_ms > 0 && span.start_time_ms > 0 && (
-                            <span className="mlflow-span-duration">
-                              {span.end_time_ms - span.start_time_ms}ms
-                            </span>
-                          )}
-                        </summary>
-                        <div className="mlflow-span-body">
-                          {span.inputs != null && (
-                            <div className="mlflow-span-section">
-                              <span className="mlflow-span-label">Inputs</span>
-                              <pre className="mlflow-span-data">
-                                {String(typeof span.inputs === "string"
-                                  ? span.inputs
-                                  : JSON.stringify(span.inputs, null, 2))}
-                              </pre>
-                            </div>
-                          )}
-                          {span.outputs != null && (
-                            <div className="mlflow-span-section">
-                              <span className="mlflow-span-label">Outputs</span>
-                              <pre className="mlflow-span-data">
-                                {String(typeof span.outputs === "string"
-                                  ? span.outputs
-                                  : JSON.stringify(span.outputs, null, 2))}
-                              </pre>
-                            </div>
-                          )}
-                        </div>
-                      </details>
-                    ))}
-                  </div>
-                </details>
-              )}
-            </div>
+            <ChatMessageItem key={msg.id} msg={msg} onDetailsToggle={scrollOnToggle} />
           ))}
           <div ref={messagesEndRef} />
         </div>
@@ -386,3 +335,120 @@ export default function ChatPlayground({ graphGetter, onClose }: Props) {
     </div>
   );
 }
+
+type DetailsToggleHandler = (e: React.SyntheticEvent<HTMLDetailsElement>) => void;
+
+interface ChatMessageItemProps {
+  msg: ChatMessage;
+  onDetailsToggle: DetailsToggleHandler;
+}
+
+const ChatMessageItem = memo(function ChatMessageItem({ msg, onDetailsToggle }: ChatMessageItemProps) {
+  return (
+    <div className={`chat-msg chat-msg-${msg.role}`}>
+      {msg.content && (
+        <div className="chat-msg-content">
+          {(() => {
+            try {
+              const parsed = JSON.parse(msg.content);
+              if (typeof parsed === "object" && parsed !== null) {
+                return <pre className="chat-json-output">{JSON.stringify(parsed, null, 2)}</pre>;
+              }
+            } catch { /* not JSON, render as markdown */ }
+            return <SimpleMarkdown content={msg.content} />;
+          })()}
+        </div>
+      )}
+
+      {msg.thinking && (
+        <div className="chat-msg-thinking">
+          <span className="chat-msg-thinking-dot" />
+          {msg.thinking}…
+        </div>
+      )}
+
+      {msg.error && (
+        <pre className="result-error">{msg.error}</pre>
+      )}
+
+      {msg.execution_trace && msg.execution_trace.length > 0 && (
+        <details className="result-details" onToggle={onDetailsToggle}>
+          <summary>Trace ({msg.execution_trace.length} steps)</summary>
+          <div className="trace">
+            {msg.execution_trace.map((step, i) => (
+              <div key={i} className="trace-step">
+                <span className="trace-badge">{step.node ?? step.role}</span>
+                <span className="trace-content">{step.content}</span>
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
+
+      {msg.mlflow_trace && msg.mlflow_trace.length > 0 && (
+        <details className="result-details" onToggle={onDetailsToggle}>
+          <summary>MLflow Trace ({msg.mlflow_trace.length} spans)</summary>
+          <div className="mlflow-trace">
+            {msg.mlflow_trace.map((span, i) => (
+              <MlflowSpanItem key={i} span={span} onDetailsToggle={onDetailsToggle} />
+            ))}
+          </div>
+        </details>
+      )}
+    </div>
+  );
+});
+
+interface MlflowSpanItemProps {
+  span: TraceSpan;
+  onDetailsToggle: DetailsToggleHandler;
+}
+
+/** Renders a single MLflow span. The body (which may contain large JSON
+ *  payloads) is only mounted when the user expands the span — keeps
+ *  JSON.stringify off the hot path during streaming and initial render. */
+const MlflowSpanItem = memo(function MlflowSpanItem({ span, onDetailsToggle }: MlflowSpanItemProps) {
+  const [open, setOpen] = useState(false);
+  const handleToggle = useCallback((e: React.SyntheticEvent<HTMLDetailsElement>) => {
+    setOpen(e.currentTarget.open);
+    onDetailsToggle(e);
+  }, [onDetailsToggle]);
+
+  return (
+    <details className="mlflow-span" onToggle={handleToggle}>
+      <summary className="mlflow-span-header">
+        <span className={`mlflow-span-status mlflow-span-status-${span.status?.toLowerCase().replace(/[^a-z]/g, "")}`} />
+        <span className="mlflow-span-name">{span.name}</span>
+        {span.end_time_ms > 0 && span.start_time_ms > 0 && (
+          <span className="mlflow-span-duration">
+            {span.end_time_ms - span.start_time_ms}ms
+          </span>
+        )}
+      </summary>
+      {open && (
+        <div className="mlflow-span-body">
+          {span.inputs != null && (
+            <div className="mlflow-span-section">
+              <span className="mlflow-span-label">Inputs</span>
+              <pre className="mlflow-span-data">
+                {typeof span.inputs === "string"
+                  ? span.inputs
+                  : JSON.stringify(span.inputs, null, 2)}
+              </pre>
+            </div>
+          )}
+          {span.outputs != null && (
+            <div className="mlflow-span-section">
+              <span className="mlflow-span-label">Outputs</span>
+              <pre className="mlflow-span-data">
+                {typeof span.outputs === "string"
+                  ? span.outputs
+                  : JSON.stringify(span.outputs, null, 2)}
+              </pre>
+            </div>
+          )}
+        </div>
+      )}
+    </details>
+  );
+});

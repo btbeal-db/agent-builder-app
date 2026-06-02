@@ -2647,6 +2647,28 @@ h4.md-header { font-size: 0.82em; }
   overflow-x: auto;
   white-space: pre;
 }
+.md-table {
+  margin: 0.5em 0;
+  border-collapse: collapse;
+  font-size: 0.85em;
+  display: block;
+  overflow-x: auto;
+  max-width: 100%;
+}
+.md-table th,
+.md-table td {
+  border: 1px solid var(--border-default);
+  padding: 0.3em 0.6em;
+  text-align: left;
+  vertical-align: top;
+}
+.md-table th {
+  background: var(--bg-elevated);
+  font-weight: 600;
+}
+.md-table tbody tr:nth-child(even) td {
+  background: var(--bg-elevated);
+}
 
 .chat-json-output {
   margin: 0;

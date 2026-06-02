@@ -13,6 +13,77 @@ logger = logging.getLogger(__name__)
 MAX_ROWS = 50
 
 
+def _format_genie_mcp_content(payload: dict) -> str:
+    """Render the managed Genie MCP COMPLETED payload as human-readable text.
+
+    Schema: content.{textAttachments[], queryAttachments[{query, description,
+    statement_response{...}}], suggestedQuestions[]}.
+    """
+    content = payload.get("content") or {}
+    parts: list[str] = []
+
+    for txt in content.get("textAttachments", []) or []:
+        if isinstance(txt, str) and txt.strip():
+            parts.append(txt)
+        elif isinstance(txt, dict):
+            t = txt.get("content") or txt.get("text")
+            if t:
+                parts.append(t)
+
+    for qa in content.get("queryAttachments", []) or []:
+        # Skip qa.description — Genie restates the user's question, which
+        # duplicates the textAttachment answer above without adding info.
+        if qa.get("query"):
+            parts.append(f"```sql\n{qa['query']}\n```")
+        stmt = qa.get("statement_response") or {}
+        result = (stmt.get("result") or {})
+        manifest = (stmt.get("manifest") or {})
+        rows = result.get("data_array") or result.get("data_typed_array") or []
+        cols = [c.get("name") or f"col_{i}" for i, c in
+                enumerate((manifest.get("schema") or {}).get("columns", []))]
+
+        def _row_cells(row):
+            # Managed Genie MCP returns rows as {"values": [...]} per row;
+            # the SDK returns plain lists. Handle either.
+            if isinstance(row, dict):
+                vals = row.get("values")
+                return vals if isinstance(vals, list) else list(row.values())
+            return list(row) if not isinstance(row, str) else [row]
+
+        def _unwrap_typed(v):
+            # Managed MCP wraps each cell as {"string_value": ...} /
+            # {"number_value": ...} / {"boolean_value": ...} / etc. Unwrap
+            # to the inner scalar so str() doesn't render the dict repr.
+            if isinstance(v, dict) and len(v) == 1:
+                key = next(iter(v))
+                if key.endswith("_value"):
+                    return v[key]
+            return v
+
+        # Escape pipes so cell text doesn't break the markdown table row.
+        # Underscores are fine — the renderer's inline pass only converts
+        # `_word_` pairs, not bare identifiers like patient_id.
+        def _md_cell(v):
+            v = _unwrap_typed(v)
+            if v is None:
+                return ""
+            return str(v).replace("|", "\\|")
+
+        if rows:
+            display = rows[:MAX_ROWS]
+            if cols:
+                header = "| " + " | ".join(_md_cell(c) for c in cols) + " |"
+                sep = "| " + " | ".join("---" for _ in cols) + " |"
+                body = ["| " + " | ".join(_md_cell(v) for v in _row_cells(row)) + " |"
+                        for row in display]
+                parts.append("\n".join([header, sep, *body]))
+            total = manifest.get("total_row_count", len(rows))
+            if len(rows) > MAX_ROWS:
+                parts.append(f"_Showing {MAX_ROWS} of {total} rows_")
+
+    return "\n\n".join(parts).strip()
+
+
 @register
 class GenieNode(BaseNode):
     @property
@@ -80,18 +151,30 @@ class GenieNode(BaseNode):
         self, config: dict, writes_to: str, query: str, room_id: str,
     ) -> dict[str, Any]:
         """Direct SDK path — used by serving endpoints."""
+        import time
         from databricks.sdk.service.dashboards import MessageStatus
 
+        # Manual start + poll so a FAILED status surfaces the Genie-side error
+        # message instead of being swallowed by SDK's generic OperationFailed.
         try:
             w = get_data_client()
-            message = w.genie.start_conversation_and_wait(room_id, query)
+            waiter = w.genie.start_conversation(room_id, query)
+            conv_id, msg_id = waiter.conversation_id, waiter.message_id
+            deadline = time.monotonic() + 300
+            message = w.genie.get_message(room_id, conv_id, msg_id)
+            terminal = {MessageStatus.COMPLETED, MessageStatus.FAILED, MessageStatus.CANCELLED}
+            while message.status not in terminal and time.monotonic() < deadline:
+                time.sleep(2)
+                message = w.genie.get_message(room_id, conv_id, msg_id)
         except Exception as exc:
             error_detail = getattr(exc, "message", str(exc))
             logger.exception("Genie SDK call failed (space=%s)", room_id)
             return {writes_to: f"Genie API error: {error_detail}"}
 
-        if message.status == MessageStatus.FAILED:
-            error_text = message.error.message if message.error else "Unknown error"
+        if message.status != MessageStatus.COMPLETED:
+            error_text = message.error.message if message.error else f"status={message.status}"
+            logger.error("Genie message did not complete (space=%s, status=%s, error=%s)",
+                         room_id, message.status, error_text)
             return {writes_to: f"Genie error: {error_text}"}
 
         parts: list[str] = []
@@ -148,15 +231,56 @@ class GenieNode(BaseNode):
     def _execute_mcp(
         self, config: dict, writes_to: str, query: str, room_id: str,
     ) -> dict[str, Any]:
-        """MCP path — used by the app preview."""
+        """MCP path — used by the app preview.
+
+        The managed Genie MCP server exposes two tools per space:
+        ``query_space_<id>`` initiates a query but returns immediately with
+        a non-terminal status, and ``poll_response_<id>`` is used to poll
+        until the message reaches a terminal state. We chain them here.
+        """
+        import json as _json
+        import time
+
+        TERMINAL = {"COMPLETED", "FAILED", "CANCELLED"}
+
+        def _parse(text: str) -> dict:
+            try:
+                return _json.loads(text)
+            except (ValueError, TypeError):
+                return {}
+
         try:
             url = config.get("mcp_server_url") or _genie_mcp_url(room_id)
             client = _get_mcp_client(url)
-            result_text = _run_mcp_in_thread(
-                _mcp_discover_and_call, url, client, {"question": str(query)},
+            # 1) Kick off the query (picks first tool = query_space_<id>)
+            raw = _run_mcp_in_thread(
+                _mcp_discover_and_call, url, client, {"query": str(query)},
             )
+            payload = _parse(raw)
+            status = str(payload.get("status", "")).upper()
+
+            # 2) Poll until terminal
+            poll_tool = f"poll_response_{room_id}"
+            deadline = time.monotonic() + 300
+            while status and status not in TERMINAL and time.monotonic() < deadline:
+                time.sleep(2)
+                client = _get_mcp_client(url)
+                raw = _run_mcp_in_thread(
+                    _mcp_discover_and_call, url, client,
+                    {
+                        "conversation_id": payload.get("conversationId", ""),
+                        "message_id": payload.get("messageId", ""),
+                    },
+                    poll_tool,
+                )
+                payload = _parse(raw) or payload
+                status = str(payload.get("status", "")).upper()
         except Exception as exc:
             logger.exception("Genie MCP call failed (room=%s)", room_id)
             return {writes_to: f"Genie error: {exc}"}
 
-        return {writes_to: result_text}
+        if status and status != "COMPLETED":
+            err = payload.get("error") or f"status={status}"
+            return {writes_to: f"Genie error: {err}"}
+
+        return {writes_to: _format_genie_mcp_content(payload) or raw}

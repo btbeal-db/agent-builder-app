@@ -7,7 +7,6 @@
       "writes_to": "verdict",
       "config": {
         "system_prompt": "You're a helpful joke agent that assesses whether or not the user's joke is funny.\n\nThe user's joke is: {input}",
-        "temperature": 0.7,
         "endpoint": "databricks-claude-sonnet-4-6",
         "output_schema": [
           {
@@ -58,7 +57,6 @@
       "writes_to": "rewrite",
       "config": {
         "system_prompt": "You have been given a bad joke to rewrite -- do your best to take account of the critique and modify based on your idea of a good joke.\n\nThe joke: {input}\n\nThe critique: {verdict.reasoning}",
-        "temperature": 0.7,
         "endpoint": "databricks-claude-sonnet-4-6",
         "output_schema": [
           {

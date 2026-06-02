@@ -101,6 +101,32 @@ export default function SimpleMarkdown({ content }: { content: string }) {
       continue;
     }
 
+    // Pipe table: header row + separator (---) + body rows
+    if (line.includes("|") && i + 1 < lines.length && /^\s*\|?\s*:?-{2,}/.test(lines[i + 1])) {
+      const splitRow = (row: string) =>
+        row.replace(/^\s*\|/, "").replace(/\|\s*$/, "").split("|").map((c) => c.trim());
+      const headers = splitRow(line);
+      i += 2; // skip header + separator
+      const rows: string[][] = [];
+      while (i < lines.length && lines[i].includes("|") && lines[i].trim()) {
+        rows.push(splitRow(lines[i]));
+        i++;
+      }
+      elements.push(
+        <table key={key++} className="md-table">
+          <thead>
+            <tr>{headers.map((h, idx) => <th key={idx}>{renderInline(h)}</th>)}</tr>
+          </thead>
+          <tbody>
+            {rows.map((r, ri) => (
+              <tr key={ri}>{r.map((c, ci) => <td key={ci}>{renderInline(c)}</td>)}</tr>
+            ))}
+          </tbody>
+        </table>
+      );
+      continue;
+    }
+
     // Blank line
     if (!line.trim()) {
       i++;

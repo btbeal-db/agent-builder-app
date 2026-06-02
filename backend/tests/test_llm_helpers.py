@@ -6,6 +6,7 @@ from backend.nodes.llm_node import (
     _resolve_templates,
     _build_schema_instruction,
     build_pydantic_model,
+    extract_visible_text,
 )
 
 
@@ -90,3 +91,61 @@ class TestBuildPydanticModel:
         instance = model(is_funny=True, reasoning="clever")
         assert instance.is_funny is True
         assert instance.reasoning == "clever"
+
+
+class TestExtractVisibleText:
+    def test_plain_string_passthrough(self):
+        assert extract_visible_text("Hello world") == "Hello world"
+
+    def test_empty_string(self):
+        assert extract_visible_text("") == ""
+
+    def test_list_of_blocks(self):
+        blocks = [
+            {"type": "reasoning", "summary": [{"type": "summary_text", "text": "thinking"}]},
+            {"type": "text", "text": "Answer"},
+        ]
+        assert extract_visible_text(blocks) == "Answer"
+
+    def test_json_encoded_bundled_chunk(self):
+        # gpt-oss non-streaming: full reasoning + text in one JSON list
+        s = json.dumps([
+            {"type": "reasoning", "summary": [{"type": "summary_text", "text": "x"}]},
+            {"type": "text", "text": "Answer"},
+        ])
+        assert extract_visible_text(s) == "Answer"
+
+    def test_concatenated_streaming_chunks(self):
+        # gpt-oss streaming accumulation: reasoning literals concatenated,
+        # then plain text chunks appended.
+        accumulated = (
+            '[{"type": "reasoning", "summary": [{"type": "summary_text", "text": "a"}]}]'
+            '[{"type": "reasoning", "summary": [{"type": "summary_text", "text": "b"}]}]'
+            'Subject: Repair RequestBody continues...'
+        )
+        assert extract_visible_text(accumulated) == "Subject: Repair RequestBody continues..."
+
+    def test_isolated_reasoning_chunk_returns_empty(self):
+        # LangGraph 1.x yields one JSON literal per stream chunk for gpt-oss.
+        # A reasoning-only chunk must return "" so the caller can skip it,
+        # otherwise raw harmony JSON leaks into the response.
+        single = '[{"type": "reasoning", "summary": [{"type": "summary_text", "text": "thinking"}]}]'
+        assert extract_visible_text(single) == ""
+
+    def test_text_after_text_blocks_preserved(self):
+        # Some chunks bundle reasoning + a partial text block, then stream
+        # additional plain text.
+        accumulated = (
+            '[{"type": "text", "text": "Hello "}]'
+            'world!'
+        )
+        assert extract_visible_text(accumulated) == "Hello world!"
+
+    def test_unrelated_bracket_string(self):
+        # Plain text that happens to start with [ but isn't JSON.
+        assert extract_visible_text("[draft] Hello") == "[draft] Hello"
+
+    def test_non_harmony_json_list(self):
+        # Valid JSON list of non-block dicts → no text extracted, return original.
+        s = '[1, 2, 3]'
+        assert extract_visible_text(s) == s

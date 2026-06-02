@@ -50,6 +50,7 @@ from .ai_chat import AIChatRequest, AIChatResponse, handle_ai_chat
 from .graph_builder import build_graph, filter_output, interrupt_value, pending_interrupts, prepare_invocation
 from .tools import discover_mcp_tool_metadata, managed_mcp_url_for_tool
 from .nodes import get_all_metadata
+from .nodes.llm_node import extract_visible_text
 from .lakebase import LakebaseConfig, provision_lakebase, resolve_lakebase
 from .setup import router as setup_router
 from .schema import (
@@ -839,7 +840,10 @@ def preview_graph(req: PreviewRequest, request: FastAPIRequest):
                         # LangGraph yields at the end of each LLM node — emitting
                         # it would duplicate text already streamed.
                         if type(msg) is AIMessageChunk and msg.content and not getattr(msg, "tool_calls", None):
-                            text = str(msg.content)
+                            text = extract_visible_text(msg.content)
+                            if not text:
+                                # All-reasoning chunk (gpt-oss harmony) — skip.
+                                continue
                             if boundary_pending:
                                 text = "\n\n" + text
                                 boundary_pending = False

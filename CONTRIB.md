@@ -167,6 +167,7 @@ Env vars `DATABRICKS_HOST`, `DATABRICKS_CLIENT_ID`, `DATABRICKS_CLIENT_SECRET` i
 | Preview — MCP Server nodes | OBO > PAT | `DatabricksOAuthClientProvider`; managed URLs prefer OBO |
 | Preview — LLM inference | SP | FMAPI rejects OBO and PAT |
 | User identity | OBO | `iam.current-user:read` scope works |
+| Folder creation + SP `Can Manage` grant (first-sign-in setup) | OBO | `workspace.workspace` scope; user owns folders under `/Users/{their_email}/...` |
 | MLflow experiment logging | SP | No OBO scope for MLflow |
 | Setup config persistence | SP | Workspace file write (SP has Can Manage) |
 | UC model registration | PAT | No UC write OBO scopes |

@@ -1,9 +1,11 @@
 """One-time MLflow experiment setup for per-user SP access.
 
-Each user creates a workspace directory for their MLflow experiments, then
-grants the app's service principal "Can Manage" on it.  This module provides
-the API endpoints that walk the user through that flow and persist the result
-in a workspace file inside the experiment directory so setup only happens once.
+Every user gets the same convention folder ``/Users/{email}/agent-sweet``;
+this module creates it, grants the app's service principal Can Manage on
+it, and persists a config file inside so setup is detected on subsequent
+sign-ins. The path is fixed by design — letting users pick their own
+breaks discovery on return visits and silently orphans their previous
+folder if they re-prompt with a different value.
 """
 
 from __future__ import annotations
@@ -15,6 +17,7 @@ import os
 import time
 
 import mlflow
+from databricks.sdk.service.iam import AccessControlRequest, PermissionLevel
 from databricks.sdk.service.workspace import ExportFormat, ImportFormat
 from fastapi import APIRouter, HTTPException
 
@@ -22,7 +25,6 @@ from .auth import get_sp_workspace_client, get_workspace_client
 from .schema import (
     SetupInfoResponse,
     SetupStatusResponse,
-    SetupValidateRequest,
     SetupValidateResponse,
 )
 
@@ -35,19 +37,19 @@ _SETUP_FILENAME = ".agent-sweet-setup.json"
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 
+def _experiment_path_for(email: str) -> str:
+    """The single, conventional experiment folder for a user."""
+    return f"/Users/{email}/agent-sweet"
+
+
 def _config_path(experiment_path: str) -> str:
     """Return the workspace path for the setup config inside the experiment dir."""
     return f"{experiment_path.rstrip('/')}/{_SETUP_FILENAME}"
 
 
 def _read_user_config(email: str) -> dict | None:
-    """Try to find a setup config in the user's default experiment directory.
-
-    Uses the SP client (which has Can Manage on the experiment folder).
-    Tries the default convention path: /Users/{email}/agent-sweet.
-    """
-    default_experiment = f"/Users/{email}/agent-sweet"
-    path = _config_path(default_experiment)
+    """Read setup config from the user's experiment folder via the SP client."""
+    path = _config_path(_experiment_path_for(email))
     try:
         sp = get_sp_workspace_client()
         resp = sp.workspace.export(path=path, format=ExportFormat.AUTO)
@@ -107,6 +109,7 @@ def setup_status():
     """Check whether the current user has completed MLflow experiment setup."""
     email = _get_user_email()
     sp_name = _get_sp_display_name()
+    experiment_path = _experiment_path_for(email)
 
     config = _read_user_config(email)
     if config and config.get("experiment_path"):
@@ -121,6 +124,7 @@ def setup_status():
         setup_complete=False,
         user_email=email,
         sp_display_name=sp_name,
+        experiment_path=experiment_path,
     )
 
 
@@ -133,22 +137,102 @@ def setup_info():
     return SetupInfoResponse(user_email=email, sp_display_name=sp_name, sp_id=sp_id)
 
 
+@router.post("/auto-setup", response_model=SetupValidateResponse)
+def auto_setup():
+    """Create the experiment folder + grant SP access via OBO, then validate.
+
+    The path is always ``/Users/{email}/agent-sweet`` — fixed by design so
+    the discovery on subsequent sign-ins is unambiguous. The OBO token has
+    the ``workspace.workspace`` scope (declared in ``databricks.yml``) and
+    the user owns folders under ``/Users/{their_email}/...``, so both
+    ``mkdirs`` and the permissions grant run without admin help.
+    """
+    sp_app_id = os.environ.get("DATABRICKS_CLIENT_ID", "")
+    if not sp_app_id:
+        return SetupValidateResponse(
+            success=False,
+            error="App service principal client ID is not configured (DATABRICKS_CLIENT_ID is unset).",
+        )
+
+    email = _get_user_email()
+    experiment_path = _experiment_path_for(email)
+
+    try:
+        user_w = get_workspace_client()
+    except Exception as exc:
+        return SetupValidateResponse(
+            success=False,
+            error=f"Could not establish workspace access: {exc}",
+        )
+
+    # 1. Create the folder. ``mkdirs`` is idempotent.
+    try:
+        user_w.workspace.mkdirs(experiment_path)
+    except Exception as exc:
+        logger.warning("Auto-setup: mkdirs(%s) failed: %s", experiment_path, exc)
+        return SetupValidateResponse(
+            success=False,
+            error=f"Could not create folder '{experiment_path}'. Error: {exc}",
+        )
+
+    # 2. Look up the folder's object_id so we can target its ACL.
+    try:
+        status = user_w.workspace.get_status(experiment_path)
+        directory_id = str(status.object_id) if status.object_id is not None else ""
+    except Exception as exc:
+        return SetupValidateResponse(
+            success=False,
+            error=f"Could not look up folder '{experiment_path}' after creating it: {exc}",
+        )
+    if not directory_id:
+        return SetupValidateResponse(
+            success=False,
+            error=f"Folder '{experiment_path}' has no object_id — cannot set permissions.",
+        )
+
+    # 3. Grant the app SP ``CAN_MANAGE``. ``permissions.update`` is additive
+    # (PATCH semantics) so existing grants for the user are preserved.
+    try:
+        user_w.permissions.update(
+            request_object_type="directories",
+            request_object_id=directory_id,
+            access_control_list=[
+                AccessControlRequest(
+                    service_principal_name=sp_app_id,
+                    permission_level=PermissionLevel.CAN_MANAGE,
+                ),
+            ],
+        )
+    except Exception as exc:
+        logger.warning("Auto-setup: permissions.update failed for %s: %s", directory_id, exc)
+        return SetupValidateResponse(
+            success=False,
+            error=(
+                f"Could not grant the app service principal access to "
+                f"'{experiment_path}'. Error: {exc}"
+            ),
+        )
+
+    return validate_setup()
+
+
 @router.post("/validate", response_model=SetupValidateResponse)
-def validate_setup(req: SetupValidateRequest):
+def validate_setup():
     """Validate that the SP can access the experiment path, then persist the record."""
     email = _get_user_email()
+    experiment_path = _experiment_path_for(email)
 
     # Validate SP access by creating a test experiment inside the user's folder.
     # Following the Genesis Workbench pattern: call workspace.mkdirs() first to
     # ensure the directory exists from the SP's perspective, then set_experiment().
     # The SP can do this because it has "Can Manage" on the folder — it doesn't
     # need access to the parent directory (e.g. /Users/user@company.com).
-    test_path = f"{req.experiment_path.rstrip('/')}/__setup_test__"
+    test_path = f"{experiment_path}/__setup_test__"
     try:
         sp = get_sp_workspace_client()
 
         # Ensure the directory is visible to the SP via Workspace API
-        sp.workspace.mkdirs(req.experiment_path)
+        sp.workspace.mkdirs(experiment_path)
 
         # Now create a test experiment inside it
         mlflow.set_tracking_uri("databricks")
@@ -169,25 +253,25 @@ def validate_setup(req: SetupValidateRequest):
                 os.environ["MLFLOW_TRACKING_TOKEN"] = prev_token
 
     except Exception as exc:
-        logger.warning("SP cannot access directory at %s: %s", req.experiment_path, exc)
+        logger.warning("SP cannot access directory at %s: %s", experiment_path, exc)
         return SetupValidateResponse(
             success=False,
             error=(
-                f"The service principal cannot access '{req.experiment_path}'. "
+                f"The service principal cannot access '{experiment_path}'. "
                 f"Make sure you granted 'Can Manage' permission on the folder. Error: {exc}"
             ),
         )
 
     # Persist the setup record as a workspace file in the user's directory
     try:
-        _write_user_config(req.experiment_path, email)
+        _write_user_config(experiment_path, email)
     except Exception as exc:
         logger.warning("Failed to persist setup record: %s", exc)
         return SetupValidateResponse(
             success=False,
             error=(
                 f"Setup validated but could not save your config to "
-                f"'{req.experiment_path}'. Error: {exc}"
+                f"'{experiment_path}'. Error: {exc}"
             ),
         )
 

@@ -6,6 +6,7 @@ import {
   useNodesState,
   useEdgesState,
   useReactFlow,
+  useStore,
   type Connection,
   type Edge,
   type Node,
@@ -55,35 +56,34 @@ interface Props {
 
 let nodeIdCounter = 0;
 
-/** Compute screen-space position for the popover anchored to a node. */
+/** Compute screen-space position for the popover anchored to a node.
+ *  Subscribes to the React Flow store so we only recompute when the viewport
+ *  transform or the node's position/size actually change — the previous
+ *  setInterval(60ms) polled forever while a node was selected and triggered
+ *  a Canvas re-render every tick. */
 function usePopoverPosition(selectedNodeId: string | null, wrapperRef: React.RefObject<HTMLDivElement | null>) {
-  const { getNode, flowToScreenPosition } = useReactFlow();
-  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
+  const { flowToScreenPosition } = useReactFlow();
+  const node = useStore((s) =>
+    selectedNodeId ? s.nodeLookup.get(selectedNodeId) : undefined,
+  );
+  const transform = useStore((s) => s.transform);
 
-  useEffect(() => {
-    if (!selectedNodeId) { setPos(null); return; }
-    const update = () => {
-      const node = getNode(selectedNodeId);
-      const wrapper = wrapperRef.current;
-      if (!node || !wrapper) { setPos(null); return; }
-      const wrapperRect = wrapper.getBoundingClientRect();
-      // Anchor to the right edge of the node, vertically centered
-      const screenPos = flowToScreenPosition({
-        x: node.position.x + (node.measured?.width ?? 160),
-        y: node.position.y,
-      });
-      setPos({
-        x: screenPos.x - wrapperRect.left + 12,
-        y: screenPos.y - wrapperRect.top,
-      });
+  return useMemo(() => {
+    if (!selectedNodeId || !node) return null;
+    const wrapper = wrapperRef.current;
+    if (!wrapper) return null;
+    const wrapperRect = wrapper.getBoundingClientRect();
+    const screenPos = flowToScreenPosition({
+      x: node.position.x + (node.measured?.width ?? 160),
+      y: node.position.y,
+    });
+    return {
+      x: screenPos.x - wrapperRect.left + 12,
+      y: screenPos.y - wrapperRect.top,
     };
-    update();
-    // Update on short interval to track panning/zooming
-    const id = setInterval(update, 60);
-    return () => clearInterval(id);
-  }, [selectedNodeId, getNode, flowToScreenPosition, wrapperRef]);
-
-  return pos;
+    // `transform` is the React Flow viewport — re-anchor on pan/zoom.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedNodeId, node?.position.x, node?.position.y, node?.measured?.width, transform, flowToScreenPosition, wrapperRef]);
 }
 
 export default function Canvas({ nodeTypes, onNodeSelect, selectedNodeId, onGraphReady, onImportReady, onStateFieldsChange, visible = true }: Props) {

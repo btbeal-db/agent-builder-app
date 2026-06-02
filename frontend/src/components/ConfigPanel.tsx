@@ -238,12 +238,18 @@ export default function ConfigPanel({ selectedNodeId, nodeTypes, stateVariables 
             type={field.field_type === "number" ? "number" : "text"}
             value={String(val)}
             placeholder={field.placeholder}
-            onChange={(next) =>
-              updateConfig(
-                field.name,
-                field.field_type === "number" ? parseFloat(next) || 0 : next
-              )
-            }
+            onChange={(next) => {
+              if (field.field_type !== "number") {
+                updateConfig(field.name, next);
+                return;
+              }
+              if (next === "") {
+                updateConfig(field.name, "");
+                return;
+              }
+              const parsed = parseFloat(next);
+              updateConfig(field.name, Number.isNaN(parsed) ? next : parsed);
+            }}
           />
         )}
         {field.help_text && (

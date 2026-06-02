@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 
-from pydantic import Field, create_model
+from pydantic import Field, ValidationError, create_model
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 
 from databricks_langchain import ChatDatabricks
@@ -13,6 +14,67 @@ from .base import BaseNode, NodeConfigField
 from . import register
 
 logger = logging.getLogger(__name__)
+
+
+def _text_from_blocks(blocks: list) -> str:
+    return "".join(
+        b.get("text", "") for b in blocks
+        if isinstance(b, dict) and b.get("type") == "text"
+    )
+
+
+def _looks_like_harmony(obj: Any) -> bool:
+    """True if ``obj`` is a list whose first dict has a harmony ``type``."""
+    if not isinstance(obj, list) or not obj:
+        return False
+    first = obj[0]
+    return isinstance(first, dict) and first.get("type") in {"reasoning", "text"}
+
+
+def extract_visible_text(content: Any) -> str:
+    """Strip gpt-oss harmony reasoning blocks; return only user-facing text.
+
+    databricks_langchain's _convert_dict_to_message stringifies non-string
+    content via ``json.dumps``, which destroys the typed-block shape that
+    AIMessage.text would normally use. This helper reverses that: parses
+    leading JSON list literals and keeps only ``type=="text"`` blocks.
+
+    Content shapes seen in practice:
+    - Plain string (Claude, Llama): pass through.
+    - List of typed blocks: keep ``type=="text"`` blocks.
+    - JSON-encoded list-of-blocks (single bundled chunk): same as above after parse.
+    - One harmony JSON literal per stream chunk (LangGraph 1.x): a single
+      ``[{...reasoning...}]`` literal arrives per chunk. After stripping we
+      return ``""`` so the caller can skip the chunk entirely.
+    - Concatenated literals + trailing text (older accumulation behavior):
+      walk leading literals, skip reasoning blocks, keep trailing plain text.
+    """
+    if isinstance(content, list):
+        return _text_from_blocks(content)
+    if not isinstance(content, str):
+        return str(content)
+    stripped = content.lstrip()
+    if not stripped.startswith("["):
+        return content
+    decoder = json.JSONDecoder()
+    text_parts: list[str] = []
+    saw_harmony = False
+    remaining = stripped
+    while remaining.startswith("["):
+        try:
+            obj, end = decoder.raw_decode(remaining)
+        except (json.JSONDecodeError, ValueError):
+            break
+        if _looks_like_harmony(obj):
+            saw_harmony = True
+            text_parts.append(_text_from_blocks(obj))
+            remaining = remaining[end:].lstrip()
+        else:
+            break
+    if remaining:
+        text_parts.append(remaining)
+    return "".join(text_parts) if saw_harmony else content
+
 
 _TYPE_MAP: dict[str, type] = {
     "str": str,
@@ -95,6 +157,31 @@ def _get_message_history(state: dict[str, Any], last_n: int = 0) -> list[BaseMes
     return messages
 
 
+_INNER_MESSAGE_RE = re.compile(r'"message"\s*:\s*"((?:[^"\\]|\\.)*)"')
+
+
+def _humanize_llm_error(exc: Exception, endpoint: str) -> str:
+    """Pull a human-readable message out of an FMAPI / OpenAI-style error.
+
+    These errors arrive doubly nested — a Python dict repr wrapping a JSON
+    string whose ``error.message`` is the actual user-facing text. The default
+    ``str(exc)`` dumps all of it. Surface only the inner message, and append
+    an actionable tip when we recognize the temperature-rejection case.
+    """
+    raw = str(exc)
+    matches = _INNER_MESSAGE_RE.findall(raw)
+    if not matches:
+        return raw
+    inner = matches[-1].replace("\\'", "'").replace('\\"', '"').replace('\\n', ' ').strip()
+    lower = inner.lower()
+    if "temperature" in lower and ("does not support" in lower or "unsupported" in lower):
+        return (
+            f"You configured a Temperature value, but this model does not support that parameter.\n\n"
+            f"Tip: clear the Temperature field on the LLM node — `{endpoint}` uses its built-in default."
+        )
+    return inner
+
+
 def _build_schema_instruction(sub_fields: list[dict[str, str]], field_name: str) -> str:
     """Build a prompt section describing the expected structured output."""
     lines = [f"You must respond with a structured `{field_name}` object containing:"]
@@ -156,7 +243,9 @@ class LLMNode(BaseNode):
                 label="Temperature",
                 field_type="number",
                 required=False,
-                default=0.7,
+                default=None,
+                help_text="Leave blank to use the endpoint's default. Reasoning models (e.g. Claude Opus 4) reject this parameter.",
+                advanced=True,
             ),
             NodeConfigField(
                 name="conversational",
@@ -190,7 +279,6 @@ class LLMNode(BaseNode):
     def execute(self, state: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
         writes_to = config.get("_writes_to", "")
         endpoint = config.get("endpoint", "databricks-meta-llama-3-3-70b-instruct")
-        temperature = float(config.get("temperature", 0.7))
         raw_prompt = config.get("system_prompt", "You are a helpful assistant.")
         conversational = str(config.get("conversational", "false")).lower() == "true"
         last_n = int(config.get("last_n_messages", 0) or 0)
@@ -200,7 +288,18 @@ class LLMNode(BaseNode):
 
         # LLM calls use the SP credentials (default env vars). FMAPI's data-plane
         # does not accept OBO tokens. Data-access nodes (VS, Genie, UC) use OBO.
-        llm = ChatDatabricks(endpoint=endpoint, temperature=temperature)
+        # ``temperature`` is opt-in: only forward it when the user explicitly
+        # set a parsable value. Reasoning endpoints (e.g. Claude Opus 4) reject
+        # the parameter — leaving it unset lets ChatDatabricks omit it from the
+        # request payload entirely.
+        llm_kwargs: dict[str, Any] = {"endpoint": endpoint}
+        raw_temp = config.get("temperature")
+        if raw_temp not in (None, "", "null"):
+            try:
+                llm_kwargs["temperature"] = float(raw_temp)
+            except (TypeError, ValueError):
+                pass
+        llm = ChatDatabricks(**llm_kwargs)
 
         # Bind tools if configured
         tools_json_raw = config.get("tools_json", "")
@@ -251,10 +350,41 @@ class LLMNode(BaseNode):
                 content=f"{system_prompt}\n\n{schema_instruction}"
             )
 
-            structured_llm = llm.with_structured_output(model_cls)
-            result = structured_llm.invoke(messages_for_llm)
+            # Use FMAPI's server-side strict json_schema response_format. The
+            # default with_structured_output(method="function_calling") path
+            # forces a tool call that some endpoints (e.g. databricks-gpt-oss-*)
+            # don't reliably emit. databricks-langchain's built-in
+            # method="json_schema" omits the required ``name`` field, so we
+            # build the payload manually here.
+            response_format = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": model_cls.__name__,
+                    "strict": True,
+                    "schema": model_cls.model_json_schema(),
+                },
+            }
+            # FMAPI rejects structured output + streaming for some endpoints
+            # (gpt-oss-* explicitly errors with "Structured output is not
+            # currently supported with streaming"). LangGraph drives nodes
+            # in a streaming context during preview, which forces .invoke()
+            # to stream unless we pin disable_streaming on the model.
+            non_streaming = ChatDatabricks(**llm_kwargs, disable_streaming=True)
+            try:
+                ai_msg = non_streaming.bind(response_format=response_format).invoke(messages_for_llm)
+            except Exception as exc:
+                raise RuntimeError(_humanize_llm_error(exc, endpoint)) from exc
+            visible = extract_visible_text(getattr(ai_msg, "content", "") or "")
+            try:
+                result_dict = model_cls(**json.loads(visible)).model_dump()
+            except (json.JSONDecodeError, ValidationError, TypeError, ValueError) as exc:
+                err = (
+                    f"Endpoint '{endpoint}' returned no parseable structured output: {exc}. "
+                    "The model did not return JSON matching the requested schema; "
+                    "try a different endpoint."
+                )
+                return {writes_to: err, "messages": [AIMessage(content=err)]}
 
-            result_dict = result.model_dump()
             response_text = json.dumps(result_dict, indent=2)
 
             return {
@@ -267,12 +397,16 @@ class LLMNode(BaseNode):
         max_iterations = int(config.get("max_tool_iterations", 10) or 10)
 
         for _ in range(max_iterations):
-            response = llm.invoke(messages_for_llm)
+            try:
+                response = llm.invoke(messages_for_llm)
+            except Exception as exc:
+                raise RuntimeError(_humanize_llm_error(exc, endpoint)) from exc
 
             if not tools or not hasattr(response, "tool_calls") or not response.tool_calls:
+                visible = extract_visible_text(response.content)
                 return {
-                    writes_to: response.content,
-                    "messages": [AIMessage(content=response.content)],
+                    writes_to: visible,
+                    "messages": [AIMessage(content=visible)],
                 }
 
             # Tool-calling loop — intermediates stay local

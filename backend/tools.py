@@ -16,9 +16,11 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import hashlib
 import json
 import logging
 import os
+import re
 from typing import Any
 from urllib.parse import urlparse
 
@@ -31,6 +33,27 @@ from mcp.client.streamable_http import streamablehttp_client
 from .auth import get_data_client, get_user_token, is_serving
 
 logger = logging.getLogger(__name__)
+
+
+# FMAPI / OpenAI tool function names must match ``^[a-zA-Z0-9_-]{1,64}$``.
+# Managed MCP servers return names like
+# ``catalog__schema__resource_name`` for UC functions and VS indexes, which
+# routinely exceed 64 chars in deep namespaces. Sanitize for the LLM side
+# while keeping the original for the MCP server call.
+_MAX_TOOL_NAME_LEN = 64
+_INVALID_TOOL_NAME_CHARS = re.compile(r"[^a-zA-Z0-9_-]")
+
+
+def _safe_tool_name(name: str) -> str:
+    """Return an OpenAI-tool-compatible name (≤64 chars, [a-zA-Z0-9_-])."""
+    cleaned = _INVALID_TOOL_NAME_CHARS.sub("_", name)
+    if len(cleaned) <= _MAX_TOOL_NAME_LEN:
+        return cleaned
+    digest = hashlib.sha1(name.encode("utf-8")).hexdigest()[:8]
+    # Keep the trailing portion of the name: the resource (e.g. function
+    # name) is more distinctive than the catalog/schema prefix.
+    keep = _MAX_TOOL_NAME_LEN - len(digest) - 1  # 1 char for separator
+    return f"{cleaned[-keep:]}_{digest}"
 
 
 # ── Managed MCP URL builders ──────────────────────────────────────────────
@@ -308,6 +331,10 @@ def _make_mcp_tools(config: dict[str, Any]) -> list[BaseTool]:
 
     for td in tool_defs:
         tool_name = td["name"]
+        # The LLM-facing name must satisfy FMAPI's tool-name constraints
+        # (≤64 chars, [a-zA-Z0-9_-]). The MCP server is still called with
+        # the original name.
+        lc_name = _safe_tool_name(tool_name)
 
         def _make_fn(_name: str = tool_name, _meta: dict | None = tool_meta) -> Any:
             def call_tool(**kwargs: Any) -> str:
@@ -325,7 +352,7 @@ def _make_mcp_tools(config: dict[str, Any]) -> list[BaseTool]:
 
         sync_tools.append(
             StructuredTool(
-                name=tool_name,
+                name=lc_name,
                 description=desc,
                 args_schema=td.get("inputSchema", {}),
                 func=_make_fn(),
@@ -440,7 +467,7 @@ def _make_vector_search_tool_sdk(config: dict[str, Any]) -> list[BaseTool]:
             docs.append("\n".join(row_parts))
         return "\n\n---\n\n".join(docs) if docs else "(no results)"
 
-    vector_search.name = f"search_{index_name.replace('.', '_')}"
+    vector_search.name = _safe_tool_name(f"search_{index_name.replace('.', '_')}")
     custom_desc = config.get("tool_description", "")
     vector_search.description = custom_desc or (
         f"Search the vector index '{index_name}' for relevant documents. "

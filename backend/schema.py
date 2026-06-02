@@ -141,6 +141,8 @@ class SetupStatusResponse(BaseModel):
     setup_complete: bool
     user_email: str
     sp_display_name: str
+    # Conventional path: /Users/{email}/agent-sweet. Returned in both states
+    # so the UI can show the user where the folder lives without recomputing.
     experiment_path: str | None = None
 
 
@@ -148,10 +150,6 @@ class SetupInfoResponse(BaseModel):
     user_email: str
     sp_display_name: str
     sp_id: str
-
-
-class SetupValidateRequest(BaseModel):
-    experiment_path: str
 
 
 class SetupValidateResponse(BaseModel):
