@@ -1035,12 +1035,13 @@ def deploy_app(req: AppDeployRequest):
             cfg = AppDeployConfig(
                 app_name=req.app_name,
                 auth_mode=req.auth_mode.value,
+                pat=req.pat,
                 resources=app_resources,
                 user_api_scopes=user_scopes,
             )
             project_dir = _Path(tempfile.mkdtemp()) / req.app_name
-            # Pre-discover MCP tools under the user's PAT (same as serving).
-            _persist_mcp_tool_metadata(req.graph, pat=req.pat)
+            # generate_app_project deep-copies the graph, stamps auth_mode, and
+            # pre-discovers MCP tools (under cfg.pat) into the baked graph_def.
             generate_app_project(req.graph, cfg, project_dir)
         except Exception as e:
             yield _emit("generate_project", DeployStepStatus.ERROR,

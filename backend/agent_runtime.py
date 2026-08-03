@@ -272,18 +272,22 @@ class CompiledAgent:
     checkpointer: PostgresSaver | None
 
 
-def load_agent(graph_def: GraphDef) -> CompiledAgent:
+def load_agent(graph_def: GraphDef, *, serving: bool = True) -> CompiledAgent:
     """Configure auth/serving, build a checkpointer from env, and compile.
 
     Sets ``auth_mode`` (so ``get_data_client()`` picks the right client type)
-    and ``set_serving(True)`` (so tool factories use direct SDK calls instead
-    of MCP routing — serving credentials work with the SDK directly, avoiding
-    ~1-2s MCP protocol overhead per tool call).
+    and ``set_serving(serving)`` (which selects the tool-factory path):
+
+    - ``serving=True`` (Model Serving endpoint): direct SDK calls. Serving
+      credentials work with the SDK directly, avoiding ~1-2s MCP overhead.
+    - ``serving=False`` (Databricks App / agents on apps): route data access
+      through managed MCP, because the app's OBO token carries ``mcp.*`` scopes
+      (not direct-SDK scopes) — same auth model as agent-sweet's own preview.
     """
     mlflow.langchain.autolog(log_traces=True)
 
     set_auth_mode(graph_def.auth_mode)
-    set_serving(True)
+    set_serving(serving)
 
     checkpointer = _checkpointer_from_env()
     compiled_graph = build_graph(graph_def, checkpointer=checkpointer)
@@ -294,11 +298,11 @@ def load_agent(graph_def: GraphDef) -> CompiledAgent:
     )
 
 
-def load_agent_from_file(graph_def_path: str) -> CompiledAgent:
+def load_agent_from_file(graph_def_path: str, *, serving: bool = True) -> CompiledAgent:
     """Load a GraphDef from a JSON file path and compile it."""
     with open(graph_def_path) as f:
         raw = json.load(f)
-    return load_agent(GraphDef(**raw))
+    return load_agent(GraphDef(**raw), serving=serving)
 
 
 def _resolve_invoke_input(agent: CompiledAgent, user_message: str, config: dict | None):

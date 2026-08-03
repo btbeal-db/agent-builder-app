@@ -357,35 +357,26 @@ def _build_auth_policy(
 
 # ── Databricks Apps ("agents on apps") mappings ──────────────────────────
 #
-# The scope + resource model changed vs. the Model Serving era:
-#   - Scopes are full dotted API-scope strings (serving.serving-endpoints,
-#     vectorsearch.vector-search-indexes, dashboards.genie, …), not mcp.*.
-#   - Vector Search was renamed "AI Search" and maps to a UC securable
-#     (TABLE/SELECT) — the databricks-sdk has no dedicated VS AppResource type.
-
-# Node/tool type → user_api_scopes (dotted API-scope strings). Used for BOTH
-# the app's user_api_scopes and the serving path's UserAuthPolicy.api_scopes.
+# App user_api_scopes use the managed-MCP vocabulary (mcp.functions,
+# mcp.vectorsearch, mcp.genie, mcp.external), NOT the dotted MLflow serving
+# scopes (serving.serving-endpoints, …).  A Databricks App's OBO token carries
+# mcp.* scopes and routes data access through managed MCP — this mirrors how
+# agent-sweet itself is declared in its own databricks.yml (proven valid).
+# LLM (FMAPI) calls use the app SP, not a user scope, so "llm" adds none.
+# Vector Search was renamed "AI Search" and maps to a UC securable (TABLE/SELECT)
+# for the resource grant — the databricks-sdk has no dedicated VS AppResource.
 _TYPE_TO_USER_SCOPES: dict[str, tuple[str, ...]] = {
-    "llm": ("serving.serving-endpoints",),
-    "vector_search": (
-        "vectorsearch.vector-search-endpoints",
-        "vectorsearch.vector-search-indexes",
-    ),
-    "genie": ("dashboards.genie",),
-    "uc_function": ("unity-catalog", "sql"),
-    # MCP server nodes may reach any resource type via an external UC
-    # connection, so grant the connection scope plus the common families.
-    "mcp_server": (
-        "catalog.connections",
-        "unity-catalog",
-        "sql",
-        "dashboards.genie",
-        "vectorsearch.vector-search-indexes",
-    ),
+    "vector_search": ("mcp.vectorsearch",),
+    "genie": ("mcp.genie",),
+    "uc_function": ("mcp.functions",),
+    # MCP server nodes may reach an external UC connection or any managed
+    # server, so grant the full mcp.* family.
+    "mcp_server": ("mcp.external", "mcp.functions", "mcp.vectorsearch", "mcp.genie"),
 }
 
-# Always granted, regardless of graph contents.
-_DEFAULT_USER_SCOPES = ("iam.current-user:read", "workspace.workspace")
+# Always granted, regardless of graph contents. (iam.current-user:read is
+# auto-granted by the platform and must NOT be requested explicitly.)
+_DEFAULT_USER_SCOPES = ("workspace.workspace",)
 
 
 def _iter_type_and_config(graph: GraphDef):
@@ -405,10 +396,11 @@ def _iter_type_and_config(graph: GraphDef):
 
 
 def graph_to_user_api_scopes(graph: GraphDef) -> list[str]:
-    """Derive the sorted set of user API scopes a graph requires.
+    """Derive the sorted set of app ``user_api_scopes`` a graph requires.
 
-    Returns dotted API-scope strings for use as an app's ``user_api_scopes``
-    (agents-on-apps) or ``UserAuthPolicy.api_scopes`` (Model Serving OBO).
+    Returns managed-MCP scope strings (``mcp.*`` + ``workspace.workspace``) for
+    a Databricks App's ``user_api_scopes``.  This is a different vocabulary from
+    the Model Serving path's ``UserAuthPolicy.api_scopes`` — do not reuse it there.
     """
     scopes: set[str] = set(_DEFAULT_USER_SCOPES)
     for tool_type, _config in _iter_type_and_config(graph):

@@ -45,6 +45,9 @@ class AppDeployConfig:
 
     app_name: str
     auth_mode: str = "obo"
+    # PAT used to pre-discover MCP tool metadata under the user's identity
+    # (falls back to SP inside _persist_mcp_tool_metadata when empty).
+    pat: str = ""
     # Lakebase env vars to bake into the deployment (LAKEBASE_ENDPOINT, etc.).
     lakebase_env: dict[str, str] = field(default_factory=dict)
     # databricks-sdk AppResource objects + user_api_scopes for databricks.yml.
@@ -87,8 +90,10 @@ from mlflow.genai.agent_server import invoke, stream
 
 from backend.agent_runtime import load_agent_from_file, run_agent, stream_agent
 
+# serving=False: this is a Databricks App, so data access routes through
+# managed MCP using the app's mcp.* OBO scopes (not direct-SDK scopes).
 _GRAPH_DEF_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "graph_def.json")
-_AGENT = load_agent_from_file(_GRAPH_DEF_PATH)
+_AGENT = load_agent_from_file(_GRAPH_DEF_PATH, serving=False)
 
 
 @invoke()
@@ -223,7 +228,7 @@ def generate_app_project(graph: GraphDef, cfg: AppDeployConfig, dest: Path) -> P
     # 1. Enrich the graph exactly like the serving path does.
     graph_for_artifact = graph.model_copy(deep=True)
     graph_for_artifact.auth_mode = cfg.auth_mode
-    _persist_mcp_tool_metadata(graph_for_artifact)
+    _persist_mcp_tool_metadata(graph_for_artifact, pat=cfg.pat)
 
     # 2. graph_def.json
     (dest / "graph_def.json").write_text(graph_for_artifact.model_dump_json())
