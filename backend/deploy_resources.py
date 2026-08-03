@@ -455,38 +455,40 @@ def graph_to_app_resources(graph: GraphDef, client=None) -> list:
         safe = f"{name_hint}_{counter}"
         app_resources.append(AppResource(name=safe, **kwargs))
 
+    # Every MLflow resource stores its identifier in ``.name`` (the constructor
+    # kwargs like ``endpoint_name`` are not exposed as attributes).
     for r in mlflow_resources:
         if isinstance(r, DatabricksServingEndpoint):
             _emit("endpoint", serving_endpoint=AppResourceServingEndpoint(
-                name=r.endpoint_name,
+                name=r.name,
                 permission=AppResourceServingEndpointServingEndpointPermission.CAN_QUERY,
             ))
         elif isinstance(r, DatabricksVectorSearchIndex):
             _emit("index", uc_securable=AppResourceUcSecurable(
-                securable_full_name=r.index_name,
+                securable_full_name=r.name,
                 securable_type=AppResourceUcSecurableUcSecurableType.TABLE,
                 permission=AppResourceUcSecurableUcSecurablePermission.SELECT,
             ))
         elif isinstance(r, DatabricksFunction):
             _emit("function", uc_securable=AppResourceUcSecurable(
-                securable_full_name=r.function_name,
+                securable_full_name=r.name,
                 securable_type=AppResourceUcSecurableUcSecurableType.FUNCTION,
                 permission=AppResourceUcSecurableUcSecurablePermission.EXECUTE,
             ))
         elif isinstance(r, DatabricksTable):
             _emit("table", uc_securable=AppResourceUcSecurable(
-                securable_full_name=r.table_name,
+                securable_full_name=r.name,
                 securable_type=AppResourceUcSecurableUcSecurableType.TABLE,
                 permission=AppResourceUcSecurableUcSecurablePermission.SELECT,
             ))
         elif isinstance(r, DatabricksGenieSpace):
             _emit("genie", genie_space=AppResourceGenieSpace(
-                space_id=r.genie_space_id,
+                space_id=r.name,
                 permission=AppResourceGenieSpaceGenieSpacePermission.CAN_RUN,
             ))
         elif isinstance(r, DatabricksSQLWarehouse):
             _emit("warehouse", sql_warehouse=AppResourceSqlWarehouse(
-                id=r.warehouse_id,
+                id=r.name,
                 permission=AppResourceSqlWarehouseSqlWarehousePermission.CAN_USE,
             ))
 
