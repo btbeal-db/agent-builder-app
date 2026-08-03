@@ -474,7 +474,10 @@ def graph_to_app_resources(graph: GraphDef, client=None) -> list:
                 permission=AppResourceUcSecurableUcSecurablePermission.SELECT,
             ))
         elif isinstance(r, DatabricksGenieSpace):
+            # AppResourceGenieSpace uniquely requires a display `name` in
+            # addition to space_id; reuse the space id as the name.
             _emit("genie", genie_space=AppResourceGenieSpace(
+                name=r.name,
                 space_id=r.name,
                 permission=AppResourceGenieSpaceGenieSpacePermission.CAN_RUN,
             ))
