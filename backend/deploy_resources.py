@@ -53,12 +53,20 @@ def _fallback_client(client=None):
 def _extract_resources(
     graph: GraphDef,
     client=None,
+    resolve_downstream: bool = True,
 ) -> list:
     """Extract Databricks resource declarations from all nodes in the graph.
 
     Maps node config fields to the appropriate MLflow resource types so that
     Model Serving provisions credentials for each external resource via
     automatic authentication passthrough.
+
+    ``resolve_downstream`` (default True, for Model Serving) also resolves a
+    Genie space's underlying tables + SQL warehouse and MCP-derived resources.
+    The agents-on-apps path passes False: an app with ``mcp.genie`` talks to the
+    Genie space (which brokers its own table access), so declaring the
+    downstream tables is unnecessary and would force the deploying user to hold
+    MANAGE on every table behind the space rather than just space access.
 
     Handles both top-level node config fields (e.g. VS node's ``index_name``)
     and tool configs embedded in an LLM node's ``tools_json`` string.
@@ -125,6 +133,12 @@ def _extract_resources(
                         _add_from_config(tc.get("config", {}))
             except (json.JSONDecodeError, TypeError):
                 pass
+
+    # Resolve Genie downstream dependencies (tables + SQL warehouse) and
+    # MCP-derived resources only for the Model Serving auth-passthrough model.
+    # The app path (resolve_downstream=False) relies on mcp.* scopes instead.
+    if not resolve_downstream:
+        return resources
 
     # Resolve Genie downstream dependencies (tables + SQL warehouse).
     # The auth passthrough docs require these to be explicitly declared.
@@ -430,7 +444,11 @@ def graph_to_app_resources(graph: GraphDef, client=None) -> list:
         AppResourceUcSecurableUcSecurableType,
     )
 
-    mlflow_resources = _extract_resources(graph, client=client)
+    # resolve_downstream=False: declare only directly-referenced resources
+    # (e.g. the Genie space itself). The app's mcp.* scopes broker access to a
+    # Genie space's underlying tables, so we don't declare — and don't require
+    # the deploying user to hold MANAGE on — those tables.
+    mlflow_resources = _extract_resources(graph, client=client, resolve_downstream=False)
 
     app_resources: list = []
     seen: set[str] = set()
