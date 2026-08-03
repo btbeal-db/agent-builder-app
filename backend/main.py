@@ -1051,7 +1051,12 @@ def deploy_app(req: AppDeployRequest):
                     "App project generated")
 
         # ── Step 3: Upload to workspace files ─────────────────────────
+        # remote_root is the WSFS path used by workspace.upload/mkdirs (accepts
+        # the /Users/... form). The Apps create/deploy APIs require a fully
+        # qualified /Workspace-prefixed path (source_root).
         remote_root = f"{req.workspace_path.rstrip('/')}/{req.app_name}"
+        source_root = remote_root if remote_root.startswith("/Workspace") \
+            else f"/Workspace{remote_root}"
         yield _emit("upload_workspace_files", DeployStepStatus.RUNNING,
                     f"Uploading files to {remote_root}...")
         try:
@@ -1086,7 +1091,7 @@ def deploy_app(req: AppDeployRequest):
                 app = w_app.apps.create_and_wait(App(
                     name=req.app_name,
                     description=f"AgentSweet agent: {req.app_name}",
-                    default_source_code_path=remote_root,
+                    default_source_code_path=source_root,
                     user_api_scopes=user_scopes,
                     resources=app_resources,
                 ))
@@ -1116,7 +1121,7 @@ def deploy_app(req: AppDeployRequest):
                                    value=req.lakebase_conn_string)]
 
             deployment = AppDeployment(
-                source_code_path=remote_root,
+                source_code_path=source_root,
                 mode=AppDeploymentMode.SNAPSHOT,
                 env_vars=env_vars or None,
             )
