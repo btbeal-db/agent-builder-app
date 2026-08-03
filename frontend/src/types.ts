@@ -119,14 +119,37 @@ export interface ExportResponse {
 export type DeployMode = "log_only" | "log_and_register" | "full";
 export type AuthMode = "obo" | "passthrough";
 
-export type DeployStepName = "validate" | "provision_lakebase" | "log_model" | "register_model" | "create_endpoint" | "complete";
+/** Which deployment target the user picks in the deploy modal. */
+export type DeployTarget = "model_serving" | "app";
+
+export type DeployStepName =
+  | "validate"
+  | "provision_lakebase"
+  | "log_model"
+  | "register_model"
+  | "create_endpoint"
+  // Agents-on-apps steps:
+  | "generate_project"
+  | "upload_workspace_files"
+  | "create_app"
+  | "deploy_app"
+  | "complete";
 export type DeployStepStatus = "pending" | "running" | "done" | "error" | "skipped";
 
 export interface DeployEvent {
   step: DeployStepName;
   status: DeployStepStatus;
   message: string;
-  data?: { endpoint_url?: string; model_version?: string; run_id?: string };
+  data?: {
+    endpoint_url?: string;
+    model_version?: string;
+    run_id?: string;
+    // Agents-on-apps result fields:
+    app_url?: string;
+    invocations_url?: string;
+    app_name?: string;
+    workspace_path?: string;
+  };
 }
 
 export interface DeployRequest {
@@ -141,6 +164,17 @@ export interface DeployRequest {
   // Lakebase — option B: use an existing project
   lakebase_existing_project_id: string;
   // Lakebase — option C: raw connection string (legacy)
+  lakebase_conn_string: string;
+}
+
+export interface AppDeployRequest {
+  graph: GraphDef;
+  app_name: string;
+  workspace_path: string;
+  auth_mode: AuthMode;
+  pat: string;
+  lakebase_project_id: string;
+  lakebase_existing_project_id: string;
   lakebase_conn_string: string;
 }
 

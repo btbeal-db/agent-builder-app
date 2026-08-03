@@ -27,16 +27,6 @@ from fastapi import FastAPI, HTTPException, Request as FastAPIRequest
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from mlflow.models.auth_policy import AuthPolicy, SystemAuthPolicy, UserAuthPolicy
-from mlflow.models.resources import (
-    DatabricksFunction,
-    DatabricksGenieSpace,
-    DatabricksServingEndpoint,
-    DatabricksSQLWarehouse,
-    DatabricksTable,
-    DatabricksVectorSearchIndex,
-)
-
 from langchain_core.messages import AIMessageChunk, BaseMessage
 
 from .auth import (
@@ -48,12 +38,21 @@ from .auth import (
 )
 from .ai_chat import AIChatRequest, AIChatResponse, handle_ai_chat
 from .graph_builder import build_graph, filter_output, interrupt_value, pending_interrupts, prepare_invocation
-from .tools import discover_mcp_tool_metadata, managed_mcp_url_for_tool
+from .deploy_resources import (
+    _build_auth_policy,
+    _extract_resources,
+    _persist_mcp_tool_metadata,
+    graph_to_app_resources,
+    graph_to_user_api_scopes,
+    lakebase_app_resource,
+)
+from .app_deploy import AppDeployConfig, generate_app_project
 from .nodes import get_all_metadata
 from .nodes.llm_node import extract_visible_text
 from .lakebase import LakebaseConfig, provision_lakebase, resolve_lakebase
 from .setup import router as setup_router
 from .schema import (
+    AppDeployRequest,
     AuthMode,
     DeployEvent,
     DeployMode,
@@ -91,363 +90,6 @@ def _serialize_messages(messages: list) -> list[dict]:
                 entry["node"] = node
             result.append(entry)
     return result
-
-
-def _extract_resources(
-    graph: GraphDef,
-    client: "WorkspaceClient | None" = None,
-) -> list:
-    """Extract Databricks resource declarations from all nodes in the graph.
-
-    Maps node config fields to the appropriate MLflow resource types so that
-    Model Serving provisions credentials for each external resource via
-    automatic authentication passthrough.
-
-    Handles both top-level node config fields (e.g. VS node's ``index_name``)
-    and tool configs embedded in an LLM node's ``tools_json`` string.
-
-    For Genie spaces, also discovers and declares downstream dependencies
-    (tables and SQL warehouse) by querying the Genie API, as required by
-    the automatic auth passthrough docs.
-
-    Args:
-        graph: The graph definition to extract resources from.
-        client: Optional WorkspaceClient for resolving Genie/MCP downstream
-            dependencies.  Pass a PAT-authenticated client during deploy so
-            the resolution uses the user's credentials rather than the app SP
-            (which may lack permission to read Genie room metadata).
-    """
-    resources = []
-    seen: set[tuple[str, str]] = set()
-
-    # Config field name → resource class mapping.
-    # Note: "endpoint_name" is the Vector Search endpoint (infrastructure),
-    # NOT a Model Serving endpoint — it does not need a resource declaration.
-    # Only the VS index itself needs to be declared.
-    resource_map = {
-        "endpoint": DatabricksServingEndpoint,        # LLM serving endpoints
-        "index_name": DatabricksVectorSearchIndex,    # VS indexes
-        "room_id": DatabricksGenieSpace,              # Genie rooms
-        "table_name": DatabricksTable,                # UC tables
-        "function_name": DatabricksFunction,          # UC functions
-    }
-
-    init_param_map = {
-        DatabricksServingEndpoint: "endpoint_name",
-        DatabricksVectorSearchIndex: "index_name",
-        DatabricksGenieSpace: "genie_space_id",
-        DatabricksTable: "table_name",
-        DatabricksFunction: "function_name",
-    }
-
-    # Collect Genie room IDs so we can resolve their dependencies after
-    genie_room_ids: list[str] = []
-
-    def _add_from_config(config: dict) -> None:
-        for config_key, resource_cls in resource_map.items():
-            value = config.get(config_key)
-            if value and (config_key, value) not in seen:
-                seen.add((config_key, value))
-                resources.append(
-                    resource_cls(**{init_param_map[resource_cls]: value})
-                )
-                if config_key == "room_id":
-                    genie_room_ids.append(value)
-
-    for node in graph.nodes:
-        # Top-level node config (VS node, Genie node, UC Function node, etc.)
-        _add_from_config(node.config)
-
-        # Tools attached to LLM nodes via tools_json
-        tools_json_raw = node.config.get("tools_json", "")
-        if tools_json_raw and str(tools_json_raw).strip():
-            try:
-                tool_configs = json.loads(str(tools_json_raw))
-                if isinstance(tool_configs, list):
-                    for tc in tool_configs:
-                        _add_from_config(tc.get("config", {}))
-            except (json.JSONDecodeError, TypeError):
-                pass
-
-    # Resolve Genie downstream dependencies (tables + SQL warehouse).
-    # The auth passthrough docs require these to be explicitly declared.
-    for room_id in genie_room_ids:
-        try:
-            # Prefer the caller-provided client (user PAT during deploy) so
-            # we can read Genie room metadata.  Fall back to SP → default.
-            w = client
-            if not w:
-                try:
-                    w = get_sp_workspace_client()
-                except RuntimeError:
-                    from databricks.sdk import WorkspaceClient
-                    w = WorkspaceClient()
-            space = w.genie.get_space(room_id, include_serialized_space=True)
-
-            # SQL warehouse
-            if space.warehouse_id and ("warehouse", space.warehouse_id) not in seen:
-                seen.add(("warehouse", space.warehouse_id))
-                resources.append(DatabricksSQLWarehouse(warehouse_id=space.warehouse_id))
-
-            # Tables from the serialized space definition
-            if space.serialized_space:
-                space_def = json.loads(space.serialized_space)
-                tables = space_def.get("data_sources", {}).get("tables", [])
-                for table in tables:
-                    table_id = table.get("identifier", "")
-                    if table_id and ("table_name", table_id) not in seen:
-                        seen.add(("table_name", table_id))
-                        resources.append(DatabricksTable(table_name=table_id))
-        except Exception as exc:
-            logger.warning("Could not resolve Genie room %s dependencies: %s", room_id, exc)
-
-    # Resolve MCP server resources.
-    # DatabricksMCPClient.get_databricks_resources() parses the MCP URL to
-    # determine the resource type (UC functions, VS indexes, Genie spaces,
-    # UC connections) and returns the corresponding MLflow resource objects.
-    # This runs in a thread because get_databricks_resources() calls
-    # list_tools() which uses asyncio.run() — incompatible with the
-    # FastAPI event loop on the calling thread.
-    mcp_urls = _collect_mcp_urls(graph)
-    if mcp_urls:
-        import concurrent.futures
-        from databricks_mcp import DatabricksMCPClient
-
-        w_mcp = client
-        if not w_mcp:
-            try:
-                w_mcp = get_sp_workspace_client()
-            except RuntimeError:
-                from databricks.sdk import WorkspaceClient
-                w_mcp = WorkspaceClient()
-
-        def _resolve_mcp(url: str) -> list:
-            try:
-                mcp_client = DatabricksMCPClient(server_url=url, workspace_client=w_mcp)
-                return mcp_client.get_databricks_resources()
-            except Exception as exc:
-                logger.warning("Could not resolve MCP resources for %s: %s", url, exc)
-                return []
-
-        with concurrent.futures.ThreadPoolExecutor() as pool:
-            futures = {pool.submit(_resolve_mcp, url): url for url in mcp_urls}
-            for future in concurrent.futures.as_completed(futures):
-                for resource in future.result():
-                    key = (type(resource).__name__, str(resource))
-                    if key not in seen:
-                        seen.add(key)
-                        resources.append(resource)
-
-    return resources
-
-
-def _collect_mcp_urls(graph: GraphDef) -> list[str]:
-    """Collect all MCP server URLs from the graph (nodes + tools_json).
-
-    Includes explicit ``mcp_server`` URLs and managed MCP URLs derived
-    from VS / Genie / UC Function node configs.
-    """
-    urls: list[str] = []
-
-    def _add_from_config(config: dict, tool_type: str) -> None:
-        if tool_type == "mcp_server":
-            url = config.get("server_url")
-            if url:
-                urls.append(url)
-        else:
-            url = managed_mcp_url_for_tool(tool_type, config)
-            if url:
-                urls.append(url)
-
-    for node in graph.nodes:
-        _add_from_config(node.config, node.type)
-
-        tools_json_raw = node.config.get("tools_json", "")
-        if tools_json_raw and str(tools_json_raw).strip():
-            try:
-                tool_configs = json.loads(str(tools_json_raw))
-                if isinstance(tool_configs, list):
-                    for tc in tool_configs:
-                        _add_from_config(tc.get("config", {}), tc.get("type", ""))
-            except (json.JSONDecodeError, TypeError):
-                pass
-    return urls
-
-
-def _persist_mcp_tool_metadata(graph: GraphDef, pat: str = "") -> None:
-    """Discover MCP tools and inject ``discovered_tools`` into the graph config.
-
-    Called at deploy time so the served model has tool metadata baked in
-    and never needs to re-contact the MCP server for discovery.  Mutates
-    the graph in place (caller should pass a deep copy).
-
-    Handles all MCP-routed tool types: ``mcp_server`` (explicit MCP nodes)
-    and ``vector_search``, ``genie``, ``uc_function`` (managed MCP routing).
-
-    Uses a PAT-authenticated WorkspaceClient for discovery (same credential
-    that works during preview).  Falls back to SP if no PAT is provided.
-    """
-    # Build a WorkspaceClient for MCP discovery
-    pat_client = create_pat_client(pat) if pat else None
-
-    def _discover(url: str) -> list:
-        client = pat_client
-        if not client:
-            try:
-                client = get_sp_workspace_client()
-            except RuntimeError:
-                from databricks.sdk import WorkspaceClient
-                client = WorkspaceClient()
-        return discover_mcp_tool_metadata(url, client)
-
-    def _persist_for_config(
-        tc_config: dict,
-        tool_type: str,
-        label: str,
-    ) -> bool:
-        """Discover and inject ``discovered_tools`` for one tool config.
-
-        Returns True if the config was modified.
-        """
-        # Explicit MCP server URL
-        url = tc_config.get("server_url", "") if tool_type == "mcp_server" else None
-
-        # VS / Genie / UC Function → build managed MCP URL
-        if not url:
-            url = managed_mcp_url_for_tool(tool_type, tc_config)
-
-        if not url:
-            return False
-
-        try:
-            metadata = _discover(url)
-            tc_config["discovered_tools"] = metadata
-            # Persist the fully-qualified MCP URL so the served model
-            # doesn't need to rebuild it from DATABRICKS_HOST (which
-            # may not include the https:// protocol in serving envs).
-            tc_config["mcp_server_url"] = url
-            logger.info("Persisted %d MCP tools for %s (%s)", len(metadata), label, url)
-            return True
-        except Exception as exc:
-            logger.warning("Failed to pre-discover MCP tools for %s (%s): %s",
-                           label, url, exc)
-            return False
-
-    # Eligible types for MCP tool persistence
-    _MCP_TYPES = {"mcp_server", "vector_search", "genie", "uc_function"}
-
-    for node in graph.nodes:
-        # Standalone nodes (not attached as tools)
-        if node.type in _MCP_TYPES:
-            _persist_for_config(node.config, node.type, f"node {node.id}")
-
-        # Tools attached to LLM nodes via tools_json
-        tools_json_raw = node.config.get("tools_json", "")
-        if not (tools_json_raw and str(tools_json_raw).strip()):
-            continue
-
-        try:
-            tool_configs = json.loads(str(tools_json_raw))
-        except (json.JSONDecodeError, TypeError):
-            continue
-        if not isinstance(tool_configs, list):
-            continue
-
-        modified = False
-        for tc in tool_configs:
-            tc_type = tc.get("type", "")
-            if tc_type not in _MCP_TYPES:
-                continue
-            if _persist_for_config(tc.get("config", {}), tc_type, f"LLM tool on {node.id}"):
-                modified = True
-
-        if modified:
-            node.config["tools_json"] = json.dumps(tool_configs)
-
-
-def _build_auth_policy(
-    graph: GraphDef,
-    client: "WorkspaceClient | None" = None,
-) -> AuthPolicy:
-    """Build an AuthPolicy for OBO (on-behalf-of) deployment.
-
-    Classification follows the Databricks agent auth docs:
-
-    **SystemAuthPolicy.resources** — resources the endpoint's SP needs:
-      - LLM serving endpoints (FMAPI rejects user tokens)
-      - Genie spaces + their downstream SQL warehouses and tables
-
-    **UserAuthPolicy.api_scopes** — direct SDK scopes for the user's
-    token.  Serving endpoints use the direct SDK (not MCP), so they
-    need the SDK-level scopes.  (The app's ``mcp.*`` scopes in
-    ``databricks.yml`` are separate — those are for app preview only.)
-      - ``vector-search`` for VS index queries
-      - ``genie`` for Genie API calls
-      - ``sql`` / ``unity-catalog`` for UC function execution
-
-    ``_extract_resources()`` resolves all resources (including Genie
-    downstream dependencies); this function then classifies each one as
-    system vs. user-scoped.
-
-    Args:
-        graph: The graph definition.
-        client: Optional WorkspaceClient (PAT-authenticated) for resolving
-            Genie/MCP downstream dependencies.
-    """
-    # Resolve every resource the graph touches (Genie downstream deps, MCP,
-    # etc.) — same list used for passthrough mode.
-    all_resources = _extract_resources(graph, client=client)
-
-    # Classify: system SP resources vs. user-scoped resources.
-    # Per the docs, LLM endpoints / Genie spaces / SQL warehouses / tables
-    # go into system auth; VS indexes and UC functions are user-scoped.
-    _SYSTEM_TYPES = (
-        DatabricksServingEndpoint,
-        DatabricksGenieSpace,
-        DatabricksSQLWarehouse,
-        DatabricksTable,
-    )
-    system_resources = [r for r in all_resources if isinstance(r, _SYSTEM_TYPES)]
-
-    # Determine user scopes by scanning node configs.
-    user_scopes: set[str] = set()
-
-    def _scan_config(config: dict, tool_type: str | None = None) -> None:
-        # Serving endpoints use the direct SDK, so the user token needs
-        # direct SDK scopes (not the app's mcp.* scopes).
-        if config.get("index_name"):
-            user_scopes.add("vector-search")
-
-        if config.get("room_id"):
-            user_scopes.add("genie")
-
-        if config.get("function_name"):
-            user_scopes.add("sql")
-            user_scopes.add("unity-catalog")
-
-        # MCP server nodes still use MCP in serving, so add both scope
-        # families to cover all resource types the server might access.
-        if config.get("server_url") and tool_type == "mcp_server":
-            user_scopes.update(["unity-catalog", "vector-search", "sql", "genie",
-                                "mcp.functions", "mcp.vectorsearch", "mcp.genie", "mcp.external"])
-
-    for node in graph.nodes:
-        _scan_config(node.config, tool_type=node.type)
-
-        tools_json_raw = node.config.get("tools_json", "")
-        if tools_json_raw and str(tools_json_raw).strip():
-            try:
-                tool_configs = json.loads(str(tools_json_raw))
-                if isinstance(tool_configs, list):
-                    for tc in tool_configs:
-                        _scan_config(tc.get("config", {}), tool_type=tc.get("type"))
-            except (json.JSONDecodeError, TypeError):
-                pass
-
-    return AuthPolicy(
-        system_auth_policy=SystemAuthPolicy(resources=system_resources),
-        user_auth_policy=UserAuthPolicy(api_scopes=sorted(user_scopes)),
-    )
 
 
 def _extract_resource_links(graph: dict, host: str) -> list:
@@ -1295,6 +937,204 @@ def deploy_graph(req: DeployRequest):
         # ── Done ──────────────────────────────────────────────────────
         yield _emit("complete", DeployStepStatus.DONE,
                      "Deployment complete!", result_data)
+
+    return StreamingResponse(
+        _generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.post("/api/graph/deploy-app")
+def deploy_app(req: AppDeployRequest):
+    """Deploy a graph as a Databricks App (agents on apps).
+
+    Alternative to Model Serving: generate a git-repo-shaped app project,
+    upload it to a workspace folder, then create + deploy a Databricks App
+    exposing ``/invocations``.  Streams SSE step progress.
+    """
+
+    def _emit(step: str, status: DeployStepStatus, message: str,
+              data: dict[str, str] | None = None) -> str:
+        event = DeployEvent(step=step, status=status, message=message, data=data)
+        return f"data: {event.model_dump_json()}\n\n"
+
+    def _generate():
+        import tempfile
+        from pathlib import Path as _Path
+
+        from databricks.sdk.service.apps import (
+            App,
+            AppDeployment,
+            AppDeploymentMode,
+            EnvVar,
+        )
+        from databricks.sdk.service.workspace import ImportFormat
+
+        result_data: dict[str, str] = {}
+
+        # ── Step 1: Validate ──────────────────────────────────────────
+        yield _emit("validate", DeployStepStatus.RUNNING, "Compiling graph...")
+        try:
+            build_graph(req.graph)
+        except Exception as e:
+            yield _emit("validate", DeployStepStatus.ERROR, f"Graph validation failed: {e}")
+            return
+        yield _emit("validate", DeployStepStatus.DONE, "Graph compiled successfully")
+
+        # ── Step 1.5: Provision or resolve Lakebase ───────────────────
+        lb_config: LakebaseConfig | None = None
+        lb_project_id = req.lakebase_project_id or req.lakebase_existing_project_id
+        lb_is_create = bool(req.lakebase_project_id)
+        # Capture SP host before any PAT client masks env vars.
+        sp_host_for_env = os.environ.get("DATABRICKS_HOST", "")
+        sp_client_id = os.environ.get("DATABRICKS_CLIENT_ID", "")
+
+        if lb_project_id:
+            action = "Provisioning" if lb_is_create else "Resolving"
+            yield _emit("provision_lakebase", DeployStepStatus.RUNNING,
+                        f"{action} Lakebase project '{lb_project_id}'...")
+            try:
+                if not req.pat:
+                    raise ValueError("A PAT is required for Lakebase setup")
+                w_lb = create_pat_client(req.pat)
+                lb_fn = provision_lakebase if lb_is_create else resolve_lakebase
+                lb_config = lb_fn(w_lb, lb_project_id, req.app_name, sp_client_id)
+            except Exception as e:
+                yield _emit("provision_lakebase", DeployStepStatus.ERROR,
+                            f"Lakebase setup failed: {e}")
+                return
+            yield _emit("provision_lakebase", DeployStepStatus.DONE,
+                        f"Lakebase ready (db: {lb_config.database})")
+        elif req.lakebase_conn_string:
+            yield _emit("provision_lakebase", DeployStepStatus.DONE,
+                        "Using provided connection string")
+        else:
+            yield _emit("provision_lakebase", DeployStepStatus.SKIPPED,
+                        "No Lakebase configuration provided")
+
+        # ── Step 2: Generate the app project ──────────────────────────
+        yield _emit("generate_project", DeployStepStatus.RUNNING,
+                    "Generating app project...")
+        try:
+            # Resolve resources + scopes (PAT client so Genie/MCP metadata
+            # resolves under the user's identity; falls back to SP inside).
+            res_client = create_pat_client(req.pat) if req.pat else None
+            app_resources = graph_to_app_resources(req.graph, client=res_client)
+            user_scopes = graph_to_user_api_scopes(req.graph)
+            if lb_config and lb_project_id:
+                # Grant the app SP the Lakebase database role. instance_name is
+                # the Lakebase project; database_name is the per-agent database.
+                app_resources.append(
+                    lakebase_app_resource(lb_project_id, lb_config.database)
+                )
+
+            cfg = AppDeployConfig(
+                app_name=req.app_name,
+                auth_mode=req.auth_mode.value,
+                resources=app_resources,
+                user_api_scopes=user_scopes,
+            )
+            project_dir = _Path(tempfile.mkdtemp()) / req.app_name
+            # Pre-discover MCP tools under the user's PAT (same as serving).
+            _persist_mcp_tool_metadata(req.graph, pat=req.pat)
+            generate_app_project(req.graph, cfg, project_dir)
+        except Exception as e:
+            yield _emit("generate_project", DeployStepStatus.ERROR,
+                        f"Project generation failed: {e}")
+            return
+        yield _emit("generate_project", DeployStepStatus.DONE,
+                    "App project generated")
+
+        # ── Step 3: Upload to workspace files ─────────────────────────
+        remote_root = f"{req.workspace_path.rstrip('/')}/{req.app_name}"
+        yield _emit("upload_workspace_files", DeployStepStatus.RUNNING,
+                    f"Uploading files to {remote_root}...")
+        try:
+            # SP has Can Manage on the setup folder (same as setup-file writes).
+            w_sp = get_sp_workspace_client()
+            for local_file in sorted(project_dir.rglob("*")):
+                if not local_file.is_file():
+                    continue
+                rel = local_file.relative_to(project_dir)
+                remote_path = f"{remote_root}/{rel.as_posix()}"
+                w_sp.workspace.mkdirs(remote_path.rsplit("/", 1)[0])
+                w_sp.workspace.upload(
+                    remote_path,
+                    local_file.read_bytes(),
+                    format=ImportFormat.RAW,
+                    overwrite=True,
+                )
+        except Exception as e:
+            yield _emit("upload_workspace_files", DeployStepStatus.ERROR,
+                        f"Workspace upload failed: {e}")
+            return
+        yield _emit("upload_workspace_files", DeployStepStatus.DONE,
+                    "Files uploaded to workspace")
+
+        # ── Step 4: Create the app ────────────────────────────────────
+        yield _emit("create_app", DeployStepStatus.RUNNING,
+                    f"Creating app '{req.app_name}'...")
+        try:
+            # App creation is privileged and user-attributed → prefer PAT.
+            w_app = create_pat_client(req.pat) if req.pat else get_sp_workspace_client()
+            try:
+                app = w_app.apps.create_and_wait(App(
+                    name=req.app_name,
+                    description=f"AgentSweet agent: {req.app_name}",
+                    default_source_code_path=remote_root,
+                    user_api_scopes=user_scopes,
+                    resources=app_resources,
+                ))
+            except ResourceAlreadyExists:
+                app = w_app.apps.get(req.app_name)
+        except Exception as e:
+            yield _emit("create_app", DeployStepStatus.ERROR,
+                        f"App creation failed (check you have permission to create "
+                        f"apps, and that user authorization + these scopes are "
+                        f"allowed by your workspace admin): {e}")
+            return
+        yield _emit("create_app", DeployStepStatus.DONE, "App created")
+
+        # ── Step 5: Deploy the app ────────────────────────────────────
+        yield _emit("deploy_app", DeployStepStatus.RUNNING, "Deploying app...")
+        try:
+            env_vars = []
+            if lb_config:
+                env_vars = [
+                    EnvVar(name="LAKEBASE_ENDPOINT", value=lb_config.endpoint),
+                    EnvVar(name="LAKEBASE_HOST", value=lb_config.host),
+                    EnvVar(name="LAKEBASE_DATABASE", value=lb_config.database),
+                    EnvVar(name="LAKEBASE_SP_HOST", value=sp_host_for_env),
+                ]
+            elif req.lakebase_conn_string:
+                env_vars = [EnvVar(name="LAKEBASE_CONN_STRING",
+                                   value=req.lakebase_conn_string)]
+
+            deployment = AppDeployment(
+                source_code_path=remote_root,
+                mode=AppDeploymentMode.SNAPSHOT,
+                env_vars=env_vars or None,
+            )
+            w_app.apps.deploy_and_wait(app_name=req.app_name, app_deployment=deployment)
+        except Exception as e:
+            yield _emit("deploy_app", DeployStepStatus.ERROR,
+                        f"App deployment failed: {e}")
+            return
+        yield _emit("deploy_app", DeployStepStatus.DONE, "App deployed")
+
+        # ── Done ──────────────────────────────────────────────────────
+        app_url = getattr(app, "url", "") or ""
+        result_data["app_name"] = req.app_name
+        result_data["workspace_path"] = remote_root
+        if app_url:
+            result_data["app_url"] = app_url
+            result_data["invocations_url"] = f"{app_url.rstrip('/')}/invocations"
+        yield _emit("complete", DeployStepStatus.DONE,
+                    "App deployed successfully!", result_data)
 
     return StreamingResponse(
         _generate(),

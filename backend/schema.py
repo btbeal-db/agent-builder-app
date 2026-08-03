@@ -135,6 +135,25 @@ class DeployResponse(BaseModel):
     error: str | None = None
 
 
+class AppDeployRequest(BaseModel):
+    """Deploy a graph as a Databricks App (agents on apps).
+
+    An alternative to Model Serving (``DeployRequest``): generates a
+    git-repo-shaped app project, uploads it to a workspace folder, and
+    creates + deploys a Databricks App exposing ``/invocations``.
+    """
+    graph: GraphDef
+    app_name: str  # Databricks App name (lowercase, hyphenated)
+    workspace_path: str  # parent workspace folder; project lands at <path>/<app_name>
+    auth_mode: AuthMode = AuthMode.OBO
+    pat: str = ""  # optional PAT for app create/deploy under user identity
+
+    # Lakebase checkpointing — mirrors DeployRequest options A/B/C.
+    lakebase_project_id: str = ""
+    lakebase_existing_project_id: str = ""
+    lakebase_conn_string: str = ""
+
+
 # ── Setup (MLflow experiment one-time config) ────────────────────────────────
 
 class SetupStatusResponse(BaseModel):

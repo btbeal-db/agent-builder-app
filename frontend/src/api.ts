@@ -3,6 +3,7 @@ import type {
   GraphDef,
   PreviewEvent,
   DeployRequest,
+  AppDeployRequest,
   DeployEvent,
   SetupStatusResponse,
   SetupInfoResponse,
@@ -109,6 +110,19 @@ export async function deployGraphStream(
   onEvent: (event: DeployEvent) => void,
 ): Promise<void> {
   const res = await fetch(`${BASE}/graph/deploy`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+  if (!res.ok) throw new Error(`Deploy request failed: ${res.status} ${res.statusText}`);
+  await consumeSSE(res, (data) => onEvent(JSON.parse(data) as DeployEvent));
+}
+
+export async function deployAppStream(
+  req: AppDeployRequest,
+  onEvent: (event: DeployEvent) => void,
+): Promise<void> {
+  const res = await fetch(`${BASE}/graph/deploy-app`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(req),

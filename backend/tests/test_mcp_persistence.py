@@ -246,7 +246,7 @@ class TestPersistMCPToolMetadata:
     """Test the deploy-time injection of discovered_tools into graph_def."""
 
     @patch("backend.tools._run_mcp_in_thread", return_value=FAKE_MCP_TOOLS)
-    @patch("backend.main.create_pat_client", return_value=MagicMock())
+    @patch("backend.deploy_resources.create_pat_client", return_value=MagicMock())
     def test_injects_into_standalone_mcp_node(self, mock_pat_client, mock_thread):
         from backend.main import _persist_mcp_tool_metadata
 
@@ -273,7 +273,7 @@ class TestPersistMCPToolMetadata:
         assert discovered[0]["name"] == "search_docs"
 
     @patch("backend.tools._run_mcp_in_thread", return_value=FAKE_MCP_TOOLS)
-    @patch("backend.main.create_pat_client", return_value=MagicMock())
+    @patch("backend.deploy_resources.create_pat_client", return_value=MagicMock())
     def test_injects_into_llm_tools_json(self, mock_pat_client, mock_thread):
         from backend.main import _persist_mcp_tool_metadata
 
@@ -308,7 +308,7 @@ class TestPersistMCPToolMetadata:
         assert len(mcp_config["discovered_tools"]) == 2
 
     @patch("backend.tools._run_mcp_in_thread", side_effect=Exception("timeout"))
-    @patch("backend.main.create_pat_client", return_value=MagicMock())
+    @patch("backend.deploy_resources.create_pat_client", return_value=MagicMock())
     def test_discovery_failure_does_not_crash(self, mock_pat_client, mock_thread):
         """Deploy should continue even if MCP discovery fails."""
         from backend.main import _persist_mcp_tool_metadata
@@ -334,7 +334,7 @@ class TestPersistMCPToolMetadata:
         assert "discovered_tools" not in graph.nodes[0].config
 
     @patch("backend.tools._run_mcp_in_thread", return_value=FAKE_MCP_TOOLS)
-    @patch("backend.main.create_pat_client", return_value=MagicMock())
+    @patch("backend.deploy_resources.create_pat_client", return_value=MagicMock())
     def test_injects_into_vs_node(self, mock_pat_client, mock_thread):
         """VS nodes now route through managed MCP and need persisted tools."""
         from backend.main import _persist_mcp_tool_metadata
@@ -356,7 +356,7 @@ class TestPersistMCPToolMetadata:
         assert len(graph.nodes[0].config["discovered_tools"]) == 2
 
     @patch("backend.tools._run_mcp_in_thread", return_value=FAKE_MCP_TOOLS)
-    @patch("backend.main.create_pat_client", return_value=MagicMock())
+    @patch("backend.deploy_resources.create_pat_client", return_value=MagicMock())
     def test_injects_into_genie_node(self, mock_pat_client, mock_thread):
         """Genie nodes now route through managed MCP and need persisted tools."""
         from backend.main import _persist_mcp_tool_metadata
@@ -377,7 +377,7 @@ class TestPersistMCPToolMetadata:
         assert "discovered_tools" in graph.nodes[0].config
 
     @patch("backend.tools._run_mcp_in_thread", return_value=FAKE_MCP_TOOLS)
-    @patch("backend.main.create_pat_client", return_value=MagicMock())
+    @patch("backend.deploy_resources.create_pat_client", return_value=MagicMock())
     def test_injects_into_uc_function_in_tools_json(self, mock_pat_client, mock_thread):
         """UC function tools in tools_json now route through managed MCP."""
         from backend.main import _persist_mcp_tool_metadata
@@ -405,7 +405,7 @@ class TestPersistMCPToolMetadata:
         updated = json.loads(graph.nodes[0].config["tools_json"])
         assert "discovered_tools" in updated[0]["config"]
 
-    @patch("backend.main.create_pat_client", return_value=MagicMock())
+    @patch("backend.deploy_resources.create_pat_client", return_value=MagicMock())
     def test_non_mcp_nodes_untouched(self, mock_pat_client):
         from backend.main import _persist_mcp_tool_metadata
 

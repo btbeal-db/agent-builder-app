@@ -1,6 +1,6 @@
 import { useState, useCallback } from "react";
-import { validateGraph, deployGraphStream } from "../api";
-import type { GraphDef, DeployMode, AuthMode, DeployStepName, DeployStepStatus, DeployEvent } from "../types";
+import { validateGraph, deployGraphStream, deployAppStream } from "../api";
+import type { GraphDef, DeployMode, AuthMode, DeployTarget, DeployStepName, DeployStepStatus, DeployEvent } from "../types";
 
 interface Props {
   graphGetter: (() => GraphDef) | null;
@@ -16,7 +16,8 @@ interface StepState {
   message: string;
 }
 
-const STEP_NAMES: DeployStepName[] = ["validate", "provision_lakebase", "log_model", "register_model", "create_endpoint"];
+const STEP_NAMES_SERVING: DeployStepName[] = ["validate", "provision_lakebase", "log_model", "register_model", "create_endpoint"];
+const STEP_NAMES_APP: DeployStepName[] = ["validate", "provision_lakebase", "generate_project", "upload_workspace_files", "create_app", "deploy_app"];
 
 const STEP_LABELS: Record<string, string> = {
   validate: "Validate Graph",
@@ -24,6 +25,10 @@ const STEP_LABELS: Record<string, string> = {
   log_model: "Log Model to MLflow",
   register_model: "Register in Unity Catalog",
   create_endpoint: "Create Serving Endpoint",
+  generate_project: "Generate App Project",
+  upload_workspace_files: "Upload to Workspace",
+  create_app: "Create Databricks App",
+  deploy_app: "Deploy App",
 };
 
 function preflight(graphGetter: (() => GraphDef) | null): string | null {
@@ -112,6 +117,12 @@ export default function DeployModal({ graphGetter, onClose, defaultExperimentPat
   const [pat, setPat] = useState("");
   const [deployMode, setDeployMode] = useState<DeployMode>("full");
   const [authMode, setAuthMode] = useState<AuthMode>("obo");
+  // Deploy target. Model Serving is the default during the transition to
+  // agents-on-apps; app deploy is offered as an opt-in "beta".
+  const [deployTarget, setDeployTarget] = useState<DeployTarget>("model_serving");
+  // App-deploy fields. workspace_path defaults to the setup folder.
+  const [appName, setAppName] = useState("");
+  const workspacePath = defaultExperimentPath ?? "";
   const [phase, setPhase] = useState<Phase>("form");
   const [steps, setSteps] = useState<Record<string, StepState>>({});
   const [resultData, setResultData] = useState<DeployEvent["data"]>({});
@@ -124,11 +135,16 @@ export default function DeployModal({ graphGetter, onClose, defaultExperimentPat
   const [lakebaseExistingProjectId, setLakebaseExistingProjectId] = useState("");
   const [lakebaseConnString, setLakebaseConnString] = useState("");
 
+  const isApp = deployTarget === "app";
   const needsCheckpointer = requiresPersistence(graphGetter);
-  const needsModelName = deployMode !== "log_only";
+  const needsModelName = !isApp && deployMode !== "log_only";
+  const STEP_NAMES = isApp ? STEP_NAMES_APP : STEP_NAMES_SERVING;
+
+  // Lakebase is shown for app deploys and for the serving "full" mode.
+  const showLakebase = isApp || deployMode === "full";
 
   const lakebaseValid = (() => {
-    if (deployMode !== "full") return true;
+    if (!showLakebase) return true;
     if (!needsCheckpointer) return true;
     switch (lakebaseMode) {
       case "create": return lakebaseProjectId.trim().length > 0;
@@ -159,19 +175,41 @@ export default function DeployModal({ graphGetter, onClose, defaultExperimentPat
 
     let receivedTerminal = false;
 
+    const lakebaseFields = {
+      lakebase_project_id: lakebaseMode === "create" ? lakebaseProjectId : "",
+      lakebase_existing_project_id: lakebaseMode === "existing" ? lakebaseExistingProjectId : "",
+      lakebase_conn_string: lakebaseMode === "connstring" ? lakebaseConnString : "",
+    };
+
+    const streamFn = isApp
+      ? (onEvent: (e: DeployEvent) => void) =>
+          deployAppStream(
+            {
+              graph,
+              app_name: appName,
+              workspace_path: workspacePath,
+              auth_mode: authMode,
+              pat,
+              ...lakebaseFields,
+            },
+            onEvent,
+          )
+      : (onEvent: (e: DeployEvent) => void) =>
+          deployGraphStream(
+            {
+              graph,
+              model_name: modelName,
+              experiment_path: experimentPath,
+              deploy_mode: deployMode,
+              auth_mode: authMode,
+              pat,
+              ...lakebaseFields,
+            },
+            onEvent,
+          );
+
     try {
-      await deployGraphStream(
-        {
-          graph,
-          model_name: modelName,
-          experiment_path: experimentPath,
-          deploy_mode: deployMode,
-          auth_mode: authMode,
-          pat: pat,
-          lakebase_project_id: lakebaseMode === "create" ? lakebaseProjectId : "",
-          lakebase_existing_project_id: lakebaseMode === "existing" ? lakebaseExistingProjectId : "",
-          lakebase_conn_string: lakebaseMode === "connstring" ? lakebaseConnString : "",
-        },
+      await streamFn(
         (event: DeployEvent) => {
           if (event.step === "complete") {
             receivedTerminal = true;
@@ -203,13 +241,15 @@ export default function DeployModal({ graphGetter, onClose, defaultExperimentPat
       setErrorMsg(e instanceof Error ? e.message : "Connection error");
       setPhase("error");
     }
-  }, [graphGetter, modelName, experimentPath, lakebaseMode, lakebaseProjectId, lakebaseExistingProjectId, lakebaseConnString, deployMode, pat]);
+  }, [graphGetter, isApp, appName, workspacePath, modelName, experimentPath, lakebaseMode, lakebaseProjectId, lakebaseExistingProjectId, lakebaseConnString, deployMode, authMode, pat]);
 
-  const doneMessage = deployMode === "full"
-    ? "Agent deployed successfully!"
-    : deployMode === "log_and_register"
-      ? "Model registered successfully!"
-      : "Model logged successfully!";
+  const doneMessage = isApp
+    ? "App deployed successfully!"
+    : deployMode === "full"
+      ? "Agent deployed successfully!"
+      : deployMode === "log_and_register"
+        ? "Model registered successfully!"
+        : "Model logged successfully!";
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -223,18 +263,55 @@ export default function DeployModal({ graphGetter, onClose, defaultExperimentPat
           <div className="modal-body">
             <div className="deploy-form">
               <label className="deploy-label">
-                Deploy Mode
+                Deploy Target
                 <select
                   className="deploy-input"
-                  value={deployMode}
-                  onChange={(e) => setDeployMode(e.target.value as DeployMode)}
+                  value={deployTarget}
+                  onChange={(e) => setDeployTarget(e.target.value as DeployTarget)}
                 >
-                  {(Object.keys(MODE_LABELS) as DeployMode[]).map((mode) => (
-                    <option key={mode} value={mode}>{MODE_LABELS[mode]}</option>
-                  ))}
+                  <option value="model_serving">Model Serving</option>
+                  <option value="app">Deploy as App (beta)</option>
                 </select>
-                <span className="deploy-hint">{MODE_DESCRIPTIONS[deployMode]}</span>
+                <span className="deploy-hint">
+                  {isApp
+                    ? "Deploy the agent as a Databricks App (agents on apps). No PAT-based model registration or serving endpoint — the app exposes /invocations directly."
+                    : "Deploy as an MLflow model + serving endpoint (classic). Requires a PAT."}
+                </span>
               </label>
+
+              {!isApp && (
+                <label className="deploy-label">
+                  Deploy Mode
+                  <select
+                    className="deploy-input"
+                    value={deployMode}
+                    onChange={(e) => setDeployMode(e.target.value as DeployMode)}
+                  >
+                    {(Object.keys(MODE_LABELS) as DeployMode[]).map((mode) => (
+                      <option key={mode} value={mode}>{MODE_LABELS[mode]}</option>
+                    ))}
+                  </select>
+                  <span className="deploy-hint">{MODE_DESCRIPTIONS[deployMode]}</span>
+                </label>
+              )}
+
+              {isApp && (
+                <label className="deploy-label">
+                  App Name
+                  <input
+                    type="text"
+                    className="deploy-input"
+                    placeholder="my-agent (lowercase, hyphenated)"
+                    value={appName}
+                    onChange={(e) => setAppName(e.target.value)}
+                  />
+                  <span className="deploy-hint">
+                    {workspacePath
+                      ? `The project will be uploaded to ${workspacePath}/${appName || "<app-name>"} and deployed as a Databricks App.`
+                      : "Configure your setup folder first — the app project is uploaded there."}
+                  </span>
+                </label>
+              )}
 
               <label className="deploy-label">
                 Authentication
@@ -251,8 +328,16 @@ export default function DeployModal({ graphGetter, onClose, defaultExperimentPat
                     ? "The agent acts as the calling user. Users need their own permissions on Vector Search, Genie, and UC Functions. LLM endpoints use system auth."
                     : "A system service principal accesses all resources. Users don't need individual permissions, but the SP gets broad access."}
                 </span>
+                {isApp && authMode === "obo" && (
+                  <span className="deploy-hint">
+                    Note: on-behalf-of-user auth for Apps requires a workspace admin to
+                    enable user authorization, and the requested scopes must be allowed
+                    by the workspace scope allowlist.
+                  </span>
+                )}
               </label>
 
+              {!isApp && (
               <label className="deploy-label">
                 Experiment Path
                 {defaultExperimentPath ? (
@@ -290,6 +375,7 @@ export default function DeployModal({ graphGetter, onClose, defaultExperimentPat
                   The experiment will be created inside your setup folder.
                 </span>
               </label>
+              )}
 
               {needsModelName && (
                 <label className="deploy-label">
@@ -304,7 +390,7 @@ export default function DeployModal({ graphGetter, onClose, defaultExperimentPat
                 </label>
               )}
 
-              {deployMode === "full" && (
+              {showLakebase && (
                 <>
                   <label className="deploy-label">
                     Lakebase (Persistent State)
@@ -377,9 +463,9 @@ export default function DeployModal({ graphGetter, onClose, defaultExperimentPat
                 </>
               )}
 
-              {needsModelName && (
+              {(needsModelName || isApp) && (
                 <label className="deploy-label">
-                  Personal Access Token
+                  Personal Access Token{isApp ? " (recommended)" : ""}
                   <input
                     type="password"
                     className="deploy-input"
@@ -388,8 +474,9 @@ export default function DeployModal({ graphGetter, onClose, defaultExperimentPat
                     onChange={(e) => setPat(e.target.value)}
                   />
                   <span className="deploy-hint">
-                    Used to register models and create endpoints under your identity.
-                    Your token is not stored — it's only used for this deploy.
+                    {isApp
+                      ? "Used to create + deploy the app under your identity, and to provision Lakebase. Required if you configure Lakebase. Your token is not stored."
+                      : "Used to register models and create endpoints under your identity. Your token is not stored — it's only used for this deploy."}
                   </span>
                 </label>
               )}
@@ -400,14 +487,18 @@ export default function DeployModal({ graphGetter, onClose, defaultExperimentPat
               <button
                 className="btn btn-primary"
                 disabled={
-                  !experimentPath ||
-                  (needsModelName && !modelName) ||
-                  (needsModelName && !pat) ||
-                  !lakebaseValid
+                  isApp
+                    ? (!appName || !workspacePath || !lakebaseValid)
+                    : (
+                        !experimentPath ||
+                        (needsModelName && !modelName) ||
+                        (needsModelName && !pat) ||
+                        !lakebaseValid
+                      )
                 }
                 onClick={handleDeploy}
               >
-                {MODE_LABELS[deployMode]}
+                {isApp ? "Deploy as App" : MODE_LABELS[deployMode]}
               </button>
             </div>
           </div>
@@ -469,18 +560,65 @@ export default function DeployModal({ graphGetter, onClose, defaultExperimentPat
                   />
                 </label>
               )}
+              {resultData?.invocations_url && (
+                <label className="deploy-label">
+                  Invocations URL
+                  <input
+                    type="text"
+                    className="deploy-input"
+                    readOnly
+                    value={resultData.invocations_url}
+                    onClick={(e) => (e.target as HTMLInputElement).select()}
+                  />
+                </label>
+              )}
+              {resultData?.app_url && (
+                <p className="deploy-meta">
+                  App: <a href={resultData.app_url} target="_blank" rel="noreferrer">{resultData.app_url}</a>
+                </p>
+              )}
               {resultData?.model_version && (
                 <p className="deploy-meta">Model version: {resultData.model_version}</p>
               )}
               {resultData?.run_id && (
                 <p className="deploy-meta">MLflow run: {resultData.run_id}</p>
               )}
+
+              {isApp && resultData?.workspace_path && (
+                <details className="deploy-git-instructions">
+                  <summary>Move to a GitHub-backed app (for team collaboration)</summary>
+                  <p className="deploy-hint">
+                    Your agent was deployed from workspace files. To collaborate as a
+                    team (e.g. add a frontend), promote it to a git-backed Databricks App:
+                  </p>
+                  <ol className="deploy-hint">
+                    <li>
+                      Export the project locally:
+                      <pre>databricks workspace export-dir {resultData.workspace_path} ./{resultData.app_name}</pre>
+                    </li>
+                    <li>
+                      Push it to GitHub:
+                      <pre>{`cd ${resultData.app_name}\ngit init && git add . && git commit -m "Initial agent app"\ngit remote add origin https://github.com/<org>/<repo>.git\ngit push -u origin main`}</pre>
+                    </li>
+                    <li>
+                      In the Databricks Apps UI, edit the app → configure Git with the
+                      repo URL + branch, add a Git credential for the app's service
+                      principal (for private repos), and enable <strong>auto-deploy on
+                      push</strong>. Teammates then clone, change, and push — the app
+                      redeploys automatically. The generated <code>README.md</code> has
+                      these steps too.
+                    </li>
+                  </ol>
+                </details>
+              )}
             </div>
             <div className="deploy-actions">
-              {resultData?.endpoint_url && (
+              {(resultData?.invocations_url || resultData?.endpoint_url) && (
                 <button
                   className="btn btn-secondary"
-                  onClick={() => navigator.clipboard.writeText(resultData.endpoint_url!)}
+                  onClick={() => navigator.clipboard.writeText(
+                    resultData.invocations_url || resultData.endpoint_url!
+                  )}
                 >
                   Copy URL
                 </button>
