@@ -93,6 +93,22 @@ class _OBOMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(_OBOMiddleware)
 
+
+# TEMP DIAGNOSTIC — remove after debugging OBO token flow.
+from starlette.requests import Request  # noqa: E402
+from backend.auth import get_user_token as _get_user_token  # noqa: E402
+
+
+@app.get("/debug/whoami")
+async def _debug_whoami(request: Request):
+    # header_present: did the Apps proxy inject the OBO token at all?
+    # ctxvar_present: does the middleware-set ContextVar survive to handler time?
+    return {
+        "header_present": bool(request.headers.get("x-forwarded-access-token")),
+        "ctxvar_present": bool(_get_user_token()),
+    }
+
+
 if __name__ == "__main__":
     agent_server.run(app_import_string="start_server:app")
 '''
