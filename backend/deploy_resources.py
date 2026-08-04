@@ -371,21 +371,25 @@ def _build_auth_policy(
 
 # ── Databricks Apps ("agents on apps") mappings ──────────────────────────
 #
-# App user_api_scopes use the managed-MCP vocabulary (mcp.functions,
-# mcp.vectorsearch, mcp.genie, mcp.external), NOT the dotted MLflow serving
-# scopes (serving.serving-endpoints, …).  A Databricks App's OBO token carries
-# mcp.* scopes and routes data access through managed MCP — this mirrors how
-# agent-sweet itself is declared in its own databricks.yml (proven valid).
+# App user_api_scopes mirror the scope set agent-sweet itself declares and
+# runs with (proven working for managed-MCP data access). Each data-access
+# type needs BOTH its mcp.* transport scope AND the underlying API scopes the
+# OBO token exercises to actually read UC data on the caller's behalf:
+#   - Genie: mcp.genie transports the call, but reading the space's tables also
+#     needs dashboards.genie + genie + catalog.*:read (without the catalog read
+#     scopes, Genie reports PERMISSION_DENIED / "No access to <table>" even when
+#     the user holds SELECT).
+#   - Vector Search / UC functions: mcp.* transport + catalog.*:read for UC
+#     metadata resolution.
 # LLM (FMAPI) calls use the app SP, not a user scope, so "llm" adds none.
-# Vector Search was renamed "AI Search" and maps to a UC securable (TABLE/SELECT)
-# for the resource grant — the databricks-sdk has no dedicated VS AppResource.
+_CATALOG_READ = ("catalog.catalogs:read", "catalog.schemas:read", "catalog.tables:read")
 _TYPE_TO_USER_SCOPES: dict[str, tuple[str, ...]] = {
-    "vector_search": ("mcp.vectorsearch",),
-    "genie": ("mcp.genie",),
-    "uc_function": ("mcp.functions",),
-    # MCP server nodes may reach an external UC connection or any managed
-    # server, so grant the full mcp.* family.
-    "mcp_server": ("mcp.external", "mcp.functions", "mcp.vectorsearch", "mcp.genie"),
+    "vector_search": ("mcp.vectorsearch", "vectorsearch.vector-search-indexes") + _CATALOG_READ,
+    "genie": ("mcp.genie", "dashboards.genie", "genie") + _CATALOG_READ,
+    "uc_function": ("mcp.functions",) + _CATALOG_READ,
+    # MCP server nodes may reach an external UC connection or any managed server.
+    "mcp_server": ("mcp.external", "mcp.functions", "mcp.vectorsearch", "mcp.genie",
+                   "catalog.connections") + _CATALOG_READ,
 }
 
 # Always granted, regardless of graph contents. (iam.current-user:read is
