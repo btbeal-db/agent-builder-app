@@ -172,7 +172,8 @@ class GenieNode(BaseNode):
             return {writes_to: f"Genie API error: {error_detail}"}
 
         if message.status != MessageStatus.COMPLETED:
-            error_text = message.error.message if message.error else f"status={message.status}"
+            error_text = (str(message.error.error) if message.error and message.error.error
+                          else f"status={message.status}")
             logger.error("Genie message did not complete (space=%s, status=%s, error=%s)",
                          room_id, message.status, error_text)
             return {writes_to: f"Genie error: {error_text}"}

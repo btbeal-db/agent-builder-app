@@ -65,6 +65,9 @@ registers @invoke()/@stream() handlers on import.
 """
 
 from mlflow.genai.agent_server import AgentServer
+from starlette.middleware.base import BaseHTTPMiddleware
+
+from backend.auth import set_user_token
 
 agent_server = AgentServer("ResponsesAgent")
 
@@ -72,6 +75,23 @@ agent_server = AgentServer("ResponsesAgent")
 import agent.agent  # noqa: E402,F401
 
 app = agent_server.app
+
+
+class _OBOMiddleware(BaseHTTPMiddleware):
+    """Capture the user's OBO token from the Apps proxy so data-access nodes
+    can route through managed MCP (mcp.* scopes) with the caller's identity.
+
+    AgentServer has its own FastAPI app and does not include AgentSweet's
+    OBO middleware; without this, get_user_token() is None and tool factories
+    fall back to the direct-SDK path (wrong for an app with mcp.* scopes).
+    """
+
+    async def dispatch(self, request, call_next):
+        set_user_token(request.headers.get("x-forwarded-access-token"))
+        return await call_next(request)
+
+
+app.add_middleware(_OBOMiddleware)
 
 if __name__ == "__main__":
     agent_server.run(app_import_string="start_server:app")
