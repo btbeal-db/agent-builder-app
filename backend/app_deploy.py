@@ -101,12 +101,35 @@ from backend.auth import get_user_token as _get_user_token  # noqa: E402
 
 @app.get("/debug/whoami")
 async def _debug_whoami(request: Request):
-    # header_present: did the Apps proxy inject the OBO token at all?
-    # ctxvar_present: does the middleware-set ContextVar survive to handler time?
-    return {
-        "header_present": bool(request.headers.get("x-forwarded-access-token")),
+    # Decode the OBO token payload (no verification) to see its actual scopes
+    # + subject/audience, and report who the SDK client resolves to.
+    import base64 as _b64, json as _json
+    tok = request.headers.get("x-forwarded-access-token") or ""
+    claims = {}
+    if tok.count(".") == 2:
+        try:
+            payload = tok.split(".")[1]
+            payload += "=" * (-len(payload) % 4)
+            claims = _json.loads(_b64.urlsafe_b64decode(payload))
+        except Exception as e:
+            claims = {"decode_error": str(e)}
+    out = {
+        "header_present": bool(tok),
         "ctxvar_present": bool(_get_user_token()),
+        "token_scope": claims.get("scope"),
+        "token_sub": claims.get("sub"),
+        "token_aud": claims.get("aud"),
+        "token_client_id": claims.get("client_id"),
     }
+    # What identity does a WorkspaceClient built from this token resolve to?
+    try:
+        import os as _os
+        from databricks.sdk import WorkspaceClient as _WC
+        w = _WC(host=_os.environ.get("DATABRICKS_HOST", ""), token=tok, auth_type="pat")
+        out["whoami"] = w.current_user.me().user_name
+    except Exception as e:
+        out["whoami_error"] = str(e)[:200]
+    return out
 
 
 if __name__ == "__main__":
