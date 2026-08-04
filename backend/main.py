@@ -14,7 +14,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import mlflow
-from databricks.sdk.errors import ResourceAlreadyExists
+from databricks.sdk.errors import AlreadyExists, ResourceAlreadyExists
 from databricks.sdk.service.serving import (
     AiGatewayConfig,
     AiGatewayInferenceTableConfig,
@@ -1095,8 +1095,17 @@ def deploy_app(req: AppDeployRequest):
                     user_api_scopes=user_scopes,
                     resources=app_resources,
                 ))
-            except ResourceAlreadyExists:
-                app = w_app.apps.get(req.app_name)
+            except (AlreadyExists, ResourceAlreadyExists):
+                # App exists (e.g. a prior run created it, or a redeploy) —
+                # update its config so resource/scope/source changes apply,
+                # then continue to the deploy step.
+                app = w_app.apps.update(req.app_name, App(
+                    name=req.app_name,
+                    description=f"AgentSweet agent: {req.app_name}",
+                    default_source_code_path=source_root,
+                    user_api_scopes=user_scopes,
+                    resources=app_resources,
+                ))
         except Exception as e:
             yield _emit("create_app", DeployStepStatus.ERROR,
                         f"App creation failed (check you have permission to create "
